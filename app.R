@@ -376,22 +376,30 @@ server <- function(input, output, session) {
     # 3. Network Program Classification & Filter
     raw <- raw %>%
       mutate(
-        # Identify Primary Network Program
-        network_program = case_when(
-          grepl("NCORE", networks, ignore.case = TRUE) ~ "NCORE",
-          grepl("NATTS", networks, ignore.case = TRUE) ~ "NATTS",
-          grepl("PAM", networks, ignore.case = TRUE) ~ "PAMS",
-          grepl("CSN|STN", networks, ignore.case = TRUE) ~ "CSN",
-          grepl("SLAMS", monitor_type, ignore.case = TRUE) ~ "SLAMS",
-          grepl("SPM|SPECIAL PURPOSE", monitor_type, ignore.case = TRUE) ~ "SPM (Special)",
-          grepl("TRIBAL", monitor_type, ignore.case = TRUE) ~ "Tribal",
-          grepl("INDUSTRIAL", monitor_type, ignore.case = TRUE) ~ "Industrial",
-          TRUE ~ "Other"
-        )
-      )
+        # Identify ALL Network Programs (Accumulation Logic)
+        prog_ncore = if_else(grepl("NCORE", networks, ignore.case = TRUE), "NCORE", NA_character_),
+        prog_pams  = if_else(grepl("PAM", networks, ignore.case = TRUE), "PAMS", NA_character_),
+        prog_natts = if_else(grepl("NATTS", networks, ignore.case = TRUE), "NATTS", NA_character_),
+        prog_csn   = if_else(grepl("CSN|STN", networks, ignore.case = TRUE), "CSN", NA_character_),
+        prog_slams = if_else(grepl("SLAMS", monitor_type, ignore.case = TRUE), "SLAMS", NA_character_),
+        prog_spm   = if_else(grepl("SPM|SPECIAL PURPOSE", monitor_type, ignore.case = TRUE), "SPM", NA_character_),
+        prog_tribal= if_else(grepl("TRIBAL", monitor_type, ignore.case = TRUE), "Tribal", NA_character_),
+        prog_ind   = if_else(grepl("INDUSTRIAL", monitor_type, ignore.case = TRUE), "Industrial", NA_character_)
+      ) %>%
+      rowwise() %>%
+      mutate(
+        # Combine all non-NA programs into a list
+        network_program = paste(na.omit(c(prog_ncore, prog_pams, prog_natts, prog_csn, prog_slams, prog_spm, prog_tribal, prog_ind)), collapse = ", "),
+        network_program = if_else(network_program == "", "Other", network_program)
+      ) %>%
+      ungroup()
     
     if (length(input$programs) > 0 && !"All" %in% input$programs) {
-      raw <- raw %>% filter(network_program %in% input$programs)
+      # Smart Filter: Sites appear if ANY of their programs match the selected list
+      raw <- raw %>% 
+        filter(purrr::map_lgl(network_program, function(p) {
+          any(sapply(input$programs, function(target) grepl(target, p, fixed = TRUE)))
+        }))
     }
     
     return(raw)
@@ -476,7 +484,7 @@ server <- function(input, output, session) {
         monitor_type           = paste(sort(unique(na.omit(monitor_type))), collapse = ", "),
         measurement_scale      = first(na.omit(measurement_scale)),
         tribe_name             = first(na.omit(tribe_name)),
-        network_program        = first(network_program),
+        network_program        = first(network_program), # Multi-program string
         networks               = first(na.omit(networks)),
         poc                    = paste(sort(unique(na.omit(poc))), collapse = ", "),
         
