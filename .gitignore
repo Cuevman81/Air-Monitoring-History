@@ -1,0 +1,31 @@
+# --- Security & Privacy ---
+# NEVER upload your API keys to GitHub
+.Renviron
+
+# --- RStudio & Local Metadata ---
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+*.Rproj
+*.Rp
+.Rprofile
+
+# --- Deployment Meta-Data ---
+rsconnect/
+
+# --- Temporary / Scratch Files ---
+scratch/
+scripts/inspect_monitors.R
+scripts/check_states.R
+
+# --- Data & Caching ---
+# We ignore the state-specific cache to keep the repo small.
+# Users will generate their own cache when they run the app.
+cache/state_*.rds
+# Keep the static state list if it exists (for reliability)
+!cache/state_list.rds
+
+# --- System Files ---
+.DS_Store
+Thumbs.db
