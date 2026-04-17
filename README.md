@@ -55,5 +55,5 @@ This project leverages the following technical resources:
 - **US Census Bureau**: Population estimates and geographic reference data.
 - **Hardware Parsing Engine**: Custom regex-based logic to extract technical equipment models from scientific method descriptions.
 
-**Maintained by**: Rodney Cuevas, Meteorologist ([Mississippi Department of Environmental Quality](https://www.mdeq.ms.gov/))
+**Maintained by**: Rodney Cuevas, Meteorologist (RCuevas@mdeq.ms.gov)
 **Last Updated**: April 2026
