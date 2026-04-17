@@ -1,6 +1,6 @@
 # Air Monitoring Network History Explorer 🌍🔬
 
-A professional, state-agnostic R-Shiny dashboard designed for technical auditing and visualization of the US Air Monitoring Network. Developed to provide meteorologists and air quality agencies with a high-resolution view of historical network growth, instrumentation evolution, and regulatory compliance.
+A professional, state-agnostic R-Shiny dashboard designed for technical auditing and visualization of the US Air Monitoring Network. Developed to provide air quality agencies with a high-resolution view of historical network growth, instrumentation evolution, and regulatory compliance.
 
 ### 🚀 [Live Demo (shinyapps.io)](https://rcuevas.shinyapps.io/Air_Monitoring_History/)
 
@@ -56,5 +56,5 @@ This project leverages the following technical resources:
 - **US Census Bureau**: Population estimates and geographic reference data.
 - **Hardware Parsing Engine**: Custom regex-based logic to extract technical equipment models from scientific method descriptions.
 
-**Maintained by**: Rodney Cuevas, Meteorologist ([Mississippi Department of Environmental Quality](https://www.mdeq.ms.gov/))
+**Maintained by**: Rodney Cuevas, Meteorologist (RCuevas@mdeq.ms.gov)
 **Last Updated**: April 2026
