@@ -53,7 +53,10 @@ pollutants_default <- list(
   "SO2"   = "42401", 
   "NO2"   = "42602", 
   "CO"    = "42101", 
-  "Lead"  = c("12128", "85129")
+  "Lead"  = c("12128", "85129"),
+  "PAMS VOCs" = "45201",    # Using Benzene as PAMS indicator
+  "Air Toxics" = "43502",   # Using Formaldehyde as Toxics indicator
+  "PM Speciation" = "88403" # PM2.5 Speciation (Sulfate/etc)
 )
 
 # Fetch States list (Static Reference for high-reliability startup)
@@ -88,9 +91,12 @@ ui <- page_sidebar(
     selectizeInput("counties", "Filter by County:", choices = NULL, multiple = TRUE, options = list(placeholder = 'All Counties')),
     selectizeInput("cbsas", "Filter by CBSA:", choices = NULL, multiple = TRUE, options = list(placeholder = 'All CBSAs')),
     selectizeInput("agencies", "Filter by Agency:", choices = NULL, multiple = TRUE, options = list(placeholder = 'All Agencies')),
+    selectizeInput("programs", "Network Program Level:", 
+                   choices = c("All", "SLAMS", "PAMS", "NCORE", "NATTS", "SPM (Special)", "Tribal", "Industrial"), 
+                   selected = "All", multiple = TRUE, options = list(placeholder = 'All Programs')),
     checkboxGroupInput("pollutants", "Pollutants to Include:", 
                        choices = names(pollutants_default), 
-                       selected = names(pollutants_default)),
+                       selected = c("Ozone", "PM2.5", "PM10", "SO2", "NO2", "CO")),
     checkboxInput("only_active", "Only Show Active Sites", value = TRUE),
     checkboxInput("reg_only", "Regulatory Monitors Only", value = FALSE),
     hr(),
@@ -164,9 +170,12 @@ ui <- page_sidebar(
                 h5("4. Multi-Parameter History Recovery"),
                 p("The database uses an expanded search algorithm to recover 100% of a network's history, handling 'Parameter Splits' such as Lead (matching both TSP STP Code 12128 and PM10 LC Code 85129) and PM2.5 (matching both Standard LC and Acceptable codes)."),
                 
-                h5("5. High-Resolution Analytical Visualization"),
-                p("The Network History charts use 'Discrete Geometry' and an 'X-Unified' vertical tracker. This professional layout locks onto the mouse cursor, providing a synchronized cross-parameter summary of active monitors, regulatory mix, and instrumentation models for any specific year in the timeline."),
-                
+                h5("5. Network Program Intelligence"),
+                p("The dashboard intelligently classifies sites into their primary regulatory programs. By parsing the 'networks' and 'monitor_type' metadata, it distinguishes between SLAMS (State/Local), NCore (National Core), PAMS (Photochemical), NATTS (Air Toxics), and Tribal stations. This allows for professional auditing of the specific mission and funding stream of any monitor in the US."),
+
+                h5("6. Specialized National Audits (VOCs & Toxics)"),
+                p("To support specialized air quality missions, the system incorporates 'Indicator Parameters' for high-level auditing. The 'PAMS VOC' suite leverages Benzene (45201) to identify active photochemical networks, while 'Air Toxics' uses Formaldehyde (43502) as the primary indicator for NATTS and Toxics trends stations across all 50 states."),
+
                 h5("Data Sources"),
                 tags$ul(
                   tags$li("EPA Air Quality System (AQS) API"),
@@ -175,7 +184,7 @@ ui <- page_sidebar(
                 ),
                 footer = list(
                   p("Developed & Maintained by: Rodney Cuevas, Meteorologist (MDEQ)"),
-                  p(tags$small("Project Version: 2.0 (GitHub Stable) - April 2026"))
+                  p(tags$small("Project Version: 2.1 (Elite Program Edition) - April 2026"))
                 )
               )
     )
@@ -208,7 +217,7 @@ server <- function(input, output, session) {
     # Construct Force-Satellite Google Maps Link
     # Uses the @lat,lng,zoomz/data=!3m1!1e3 structure for instant satellite layer
     gmaps_url <- paste0("https://www.google.com/maps/@", sites$latitude, ",", sites$longitude, ",18z/data=!3m1!1e3")
-    
+    # Create popup content
     paste0(
       "<div style='font-family: sans-serif; min-width: 250px;'>",
       "<h4 style='margin:0; color:", status_colors, ";'>", sites$local_site_name, "</h4>",
@@ -364,6 +373,27 @@ server <- function(input, output, session) {
         filter(!grepl("NON-REGULATORY|INDUSTRIAL|SPECIAL PURPOSE", monitor_type, ignore.case = TRUE))
     }
     
+    # 3. Network Program Classification & Filter
+    raw <- raw %>%
+      mutate(
+        # Identify Primary Network Program
+        network_program = case_when(
+          grepl("NCORE", networks, ignore.case = TRUE) ~ "NCORE",
+          grepl("NATTS", networks, ignore.case = TRUE) ~ "NATTS",
+          grepl("PAM", networks, ignore.case = TRUE) ~ "PAMS",
+          grepl("CSN|STN", networks, ignore.case = TRUE) ~ "CSN",
+          grepl("SLAMS", monitor_type, ignore.case = TRUE) ~ "SLAMS",
+          grepl("SPM|SPECIAL PURPOSE", monitor_type, ignore.case = TRUE) ~ "SPM (Special)",
+          grepl("TRIBAL", monitor_type, ignore.case = TRUE) ~ "Tribal",
+          grepl("INDUSTRIAL", monitor_type, ignore.case = TRUE) ~ "Industrial",
+          TRUE ~ "Other"
+        )
+      )
+    
+    if (length(input$programs) > 0 && !"All" %in% input$programs) {
+      raw <- raw %>% filter(network_program %in% input$programs)
+    }
+    
     return(raw)
   })
   
@@ -418,7 +448,7 @@ server <- function(input, output, session) {
                             paste0(open_date, " to Present"), 
                             paste0(open_date, " to ", close_date)),
         
-        # Build specific pollutant tag: e.g. "PM2.5 (POC 1 - T640 - FRM - [2011 to Present])"
+        # Build specific pollutant tag
         poll_tag = paste0(
           pollutant_type, 
           " (POC ", poc, 
@@ -446,11 +476,13 @@ server <- function(input, output, session) {
         monitor_type           = paste(sort(unique(na.omit(monitor_type))), collapse = ", "),
         measurement_scale      = first(na.omit(measurement_scale)),
         tribe_name             = first(na.omit(tribe_name)),
+        network_program        = first(network_program),
+        networks               = first(na.omit(networks)),
         poc                    = paste(sort(unique(na.omit(poc))), collapse = ", "),
         
         # Timeline
         Site_Established       = min(open_date, na.rm = TRUE),
-        Site_Closed            = (if(any(is.na(close_date))) as.Date(NA) else max(close_date, na.rm = TRUE)),
+        Site_Closed            = if_else(any(is.na(close_date)), as.Date(NA), max(close_date, na.rm = TRUE)),
         Years_Active           = round(as.numeric(difftime(max(calc_close), min(open_date), units = "days")) / 365.25, 1),
         
         # Pollutant Split Logic with POC/Method tags

@@ -14,17 +14,20 @@
 # --- Deployment Meta-Data ---
 rsconnect/
 
-# --- Temporary / Scratch Files ---
-scratch/
-scripts/inspect_monitors.R
-scripts/check_states.R
-
 # --- Data & Caching ---
-# We ignore the state-specific cache to keep the repo small.
+# We keep the cache folder structure but ignore state-specific data
 # Users will generate their own cache when they run the app.
 cache/state_*.rds
-# Keep the static state list if it exists (for reliability)
 !cache/state_list.rds
+MS_Raw_Monitor_Cache.rds
+
+# --- Legacy Project Folders (Mac Only) ---
+# We exclude these from GitHub to keep the public repo clean
+data/
+docs/
+output/
+scratch/
+scripts/
 
 # --- System Files ---
 .DS_Store

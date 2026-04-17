@@ -9,10 +9,11 @@ A professional, state-agnostic R-Shiny dashboard designed for technical auditing
 ## 🔬 Core Features
 
 - **Universal State Architecture**: Dynamically scales to any US state or territory, fetching official county denominators and monitor metadata via the EPA AQS API.
+- **National Program Intelligence**: Automatically classifies and audits monitors by regulatory program, including **NCore** (Flagship Multipollutant), **PAMS** (Photochemical), **NATTS** (Air Toxics), and **CSN/Speciation** networks.
 - **Hardware-First Technical Audit**: Utilizes a sophisticated parsing engine to identify specific manufacturer hardware (e.g., **Teledyne T640**, **Met One BAM**, **Thermo TEOM**).
+- **Specialized Network Auditing**: Integrated indicators for **VOC chemistry** (Benzene) and **Air Toxics** (Formaldehyde) trends.
 - **Gaseous Hardware Decoder**: Intelligently maps legacy EPA "Instrumental" labels to specific scientific categories such as **UV Photometric** and **Chemiluminescence** Analyzers.
-- **Regulatory Hierarchy Visualization**: Distinguishes between Regulatory (SLAMS/NCORE) and AQI-only (88502/TEOM) monitors across historical timelines.
-- **High-Resolution Interactive Charts**: Features "X-Unified" hover tracking for synchronized temporal analysis of data counts and technical methods.
+- **High-Resolution Interactive Charts**: Features "X-Unified" hover tracking for synchronized temporal analysis of network growth and technical methods.
 
 ## 🛠️ Installation (Local Run)
 
