@@ -489,8 +489,8 @@ server <- function(input, output, session) {
         poc                    = paste(sort(unique(na.omit(poc))), collapse = ", "),
         
         # Timeline
-        Site_Established       = min(open_date, na.rm = TRUE),
-        Site_Closed            = if_else(any(is.na(close_date)), as.Date(NA), max(close_date, na.rm = TRUE)),
+        Site_Established       = if(all(is.na(open_date))) as.Date(NA) else min(open_date, na.rm = TRUE),
+        Site_Closed            = if(any(is.na(close_date))) as.Date(NA) else max(close_date, na.rm = TRUE),
         Years_Active           = round(as.numeric(difftime(max(calc_close), min(open_date), units = "days")) / 365.25, 1),
         
         # Pollutant Split Logic with POC/Method tags
@@ -517,7 +517,7 @@ server <- function(input, output, session) {
   # Metrics
   output$active_coverage <- renderUI({ 
     hist <- processed_history()
-    validate(need(nrow(hist) > 0, "No data..."))
+    shiny::validate(need(nrow(hist) > 0, "No data..."))
     active <- sum(hist$Status == "Active")
     
     if (is.na(data_store$pop)) {
@@ -543,7 +543,7 @@ server <- function(input, output, session) {
   
   output$site_records <- renderUI({ 
     hist <- processed_history()
-    validate(need(nrow(hist) > 0, "No records found"))
+    shiny::validate(need(nrow(hist) > 0, "No records found"))
     active_sites <- hist %>% filter(Status == "Active" & !is.na(Site_Established))
     
     if (nrow(active_sites) > 0) {
@@ -564,7 +564,7 @@ server <- function(input, output, session) {
   output$county_coverage <- renderText({ 
     req(data_store$raw)
     hist <- processed_history()
-    validate(need(nrow(hist) > 0, "0/0"))
+    shiny::validate(need(nrow(hist) > 0, "0/0"))
     
     # Use the official denominator if available, else fallback to data-driven
     total_counties <- data_store$total_counties_in_state %||% length(unique(data_store$raw$county_name))
@@ -661,7 +661,7 @@ server <- function(input, output, session) {
   output$trend_plot <- renderPlotly({
     req(input$year_range[1], input$year_range[2]) # Prevent transition errors
     hist <- processed_history()
-    validate(need(nrow(hist) > 0, "No data for selected range"))
+    shiny::validate(need(nrow(hist) > 0, "No data for selected range"))
     
     raw <- filtered_raw() %>%
       mutate(open = as_date(open_date), close = as_date(close_date))
@@ -694,7 +694,7 @@ server <- function(input, output, session) {
   output$pollutant_plot <- renderPlotly({
     req(input$year_range[1], input$year_range[2]) # Prevent transition errors
     req(data_store$raw)
-    validate(need(nrow(processed_history()) > 0, "No data..."))
+    shiny::validate(need(nrow(processed_history()) > 0, "No data..."))
     
     raw <- filtered_raw() %>%
       mutate(
@@ -806,7 +806,7 @@ server <- function(input, output, session) {
   # Data Table
   output$table <- renderDT({
     hist <- processed_history()
-    validate(need(nrow(hist) > 0, "No data available"))
+    shiny::validate(need(nrow(hist) > 0, "No data available"))
     
     # Wrap in datatable() to use formatStyle extension correctly
     datatable(
