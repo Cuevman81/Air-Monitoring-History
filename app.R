@@ -405,7 +405,10 @@ server <- function(input, output, session) {
     # Pre-filter for map sanity (removes the validateCoords warning)
     raw <- raw %>% filter(!is.na(latitude) & !is.na(longitude) & latitude != 0)
     
-    # Processed Data (Refined History Logic)
+    return(raw)
+  })
+  
+  # Processed Data (Refined History Logic)
   processed_history <- reactive({
     sites <- filtered_raw()
     
@@ -489,8 +492,8 @@ server <- function(input, output, session) {
         poc                    = paste(sort(unique(na.omit(poc))), collapse = ", "),
         
         # Timeline
-        Site_Established       = if(length(na.omit(open_date)) > 0) min(open_date, na.rm = TRUE) else as.Date(NA),
-        Site_Closed            = if(any(is.na(close_date)) || length(na.omit(close_date)) == 0) as.Date(NA) else max(close_date, na.rm = TRUE),
+        Site_Established       = (if(length(na.omit(open_date)) > 0) min(open_date, na.rm = TRUE) else as.Date(NA)),
+        Site_Closed            = (if(any(is.na(close_date)) || length(na.omit(close_date)) == 0) as.Date(NA) else max(close_date, na.rm = TRUE)),
         Years_Active           = round(as.numeric(difftime(max(calc_close, na.rm = TRUE), min(open_date, na.rm = TRUE), units = "days")) / 365.25, 1),
         
         # Pollutant Split Logic with POC/Method tags
