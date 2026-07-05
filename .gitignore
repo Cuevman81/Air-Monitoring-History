@@ -13,6 +13,7 @@
 
 # --- Deployment Meta-Data ---
 rsconnect/
+manifest.json
 
 # --- Data & Caching ---
 # We keep the cache folder structure but ignore state-specific data

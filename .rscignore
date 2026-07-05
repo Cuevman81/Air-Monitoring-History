@@ -5,6 +5,8 @@
 #   rsconnect::deployApp(envVars = c("AQS_EMAIL", "AQS_KEY", "CENSUS_API_KEY"))
 .Rhistory
 .git
+deploy.R
+manifest.json
 .gitignore
 data
 docs

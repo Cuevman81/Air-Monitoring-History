@@ -58,8 +58,13 @@ shinyapps.io account — never commit it to git). A `.rscignore` file keeps loca
 data, docs, and scripts out of the bundle. Deploy from the R console:
 
 ```r
-rsconnect::deployApp(appName = "Air_Monitoring_History", forceUpdate = TRUE)
+source("deploy.R")
 ```
+
+`deploy.R` handles a known issue: terra 1.9-34 (a transitive dependency via
+leaflet → raster) fails to compile against the GDAL 3.4.1 on shinyapps.io's
+build image, so the script pins terra to 1.8-86 in the deployment manifest.
+Once a fixed terra release ships, plain `rsconnect::deployApp()` will work again.
 
 If you migrate to Posit Connect, exclude `.Renviron` from the bundle and pass
 credentials with `deployApp(envVars = c("AQS_EMAIL", "AQS_KEY", "CENSUS_API_KEY"))` instead.
