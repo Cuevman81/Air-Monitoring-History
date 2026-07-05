@@ -1,11 +1,11 @@
 # Files excluded from the shinyapps.io deployment bundle (rsconnect >= 1.0).
-# CRITICAL: never ship API credentials inside the bundle — pass them with
+# NOTE: shinyapps.io does NOT support server-side envVars, so .Renviron must
+# ship in the bundle (it is visible only to this shinyapps.io account).
+# If you ever migrate to Posit Connect, exclude .Renviron here and use
 #   rsconnect::deployApp(envVars = c("AQS_EMAIL", "AQS_KEY", "CENSUS_API_KEY"))
-.Renviron
 .Rhistory
 .git
 .gitignore
-cache
 data
 docs
 output

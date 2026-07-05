@@ -52,12 +52,17 @@ shiny::runApp()
 ```
 
 ### 5. Deploying (shinyapps.io)
-Do **not** bundle your `.Renviron` with the deployment — pass credentials as server-side
-environment variables instead so keys never ship inside the app bundle:
+shinyapps.io does not support server-side environment variables, so the `.Renviron`
+file must be included in the deployment bundle (it is visible only to your
+shinyapps.io account — never commit it to git). A `.rscignore` file keeps local
+data, docs, and scripts out of the bundle. Deploy from the R console:
 
 ```r
-rsconnect::deployApp(envVars = c("AQS_EMAIL", "AQS_KEY", "CENSUS_API_KEY"))
+rsconnect::deployApp(appName = "Air_Monitoring_History", forceUpdate = TRUE)
 ```
+
+If you migrate to Posit Connect, exclude `.Renviron` from the bundle and pass
+credentials with `deployApp(envVars = c("AQS_EMAIL", "AQS_KEY", "CENSUS_API_KEY"))` instead.
 
 ---
 
