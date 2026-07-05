@@ -47,17 +47,37 @@ if (!dir.exists("cache")) dir.create("cache")
 
 # Configuration: Criteria Pollutants with multi-code recovery
 pollutants_default <- list(
-  "Ozone" = "44201", 
-  "PM2.5" = c("88101", "88502"), 
+  "Ozone" = "44201",
+  "PM2.5" = c("88101", "88502"),
   "PM10"  = "81102",
-  "SO2"   = "42401", 
-  "NO2"   = "42602", 
-  "CO"    = "42101", 
-  "Lead"  = c("12128", "85129"),
+  "SO2"   = "42401",
+  "NO2"   = "42602",
+  "CO"    = "42101",
+  "Lead"  = c("14129", "12128", "85129"), # 14129 = Pb TSP LC (2008 NAAQS design-value parameter)
+  "TSP (Historical)" = "11101", # Pre-1987 particulate NAAQS; recovers 1950s-70s site history
+  "NOy (NCore)" = "42600",      # Required NCore trace-level reactive nitrogen
+  "PM10-2.5 (NCore)" = "86101", # Required NCore coarse fraction
+  "Meteorology" = c("61103", "62101"), # Resultant wind speed / ambient temp (PAMS & NCore requirement)
   "PAMS VOCs" = "45201",    # Using Benzene as PAMS indicator
   "Air Toxics" = "43502",   # Using Formaldehyde as Toxics indicator
   "PM Speciation" = "88403" # PM2.5 Speciation (Sulfate/etc)
 )
+
+# Bump when pollutants_default or the cache schema changes so previously
+# downloaded state caches are re-fetched instead of silently missing parameters.
+CACHE_VERSION <- "v3"
+state_cache_path <- function(state_code) {
+  file.path("cache", paste0("state_", state_code, "_", CACHE_VERSION, ".rds"))
+}
+
+# Reporting-audit cache (metadata vs. submitted AQS annual data)
+audit_cache_path <- function(state_code, audit_year) {
+  file.path("cache", paste0("audit_", state_code, "_", audit_year, ".rds"))
+}
+
+# Most recent complete data year: AQS certification runs through May 1, so the
+# prior calendar year is the newest year we can fairly hold monitors to.
+default_audit_year <- function() year(Sys.Date()) - 1
 
 # Fetch States list (Static Reference for high-reliability startup)
 state_df <- data.frame(
@@ -78,6 +98,44 @@ state_df <- data.frame(
 
 state_choices <- setNames(state_df$stateFIPS, state_df$state)
 
+# App-lifetime caches shared across all sessions in this R process
+pop_cache_env <- new.env(parent = emptyenv()) # Census population by state FIPS
+refresh_log   <- new.env(parent = emptyenv()) # Last "Sync Latest Data" time by state FIPS
+
+# Vectorized network-program classification (runs once per data load, not per filter change)
+classify_programs <- function(df) {
+  networks <- ifelse(is.na(df$networks), "", df$networks)
+  mtype    <- ifelse(is.na(df$monitor_type), "", df$monitor_type)
+  tags <- cbind(
+    ifelse(grepl("NCORE",   networks, ignore.case = TRUE), "NCORE",   NA_character_),
+    ifelse(grepl("PAM",     networks, ignore.case = TRUE), "PAMS",    NA_character_),
+    ifelse(grepl("NATTS",   networks, ignore.case = TRUE), "NATTS",   NA_character_),
+    ifelse(grepl("CSN|STN", networks, ignore.case = TRUE), "CSN",     NA_character_),
+    ifelse(grepl("CASTNET", networks, ignore.case = TRUE), "CASTNET", NA_character_),
+    ifelse(grepl("SLAMS",   mtype, ignore.case = TRUE), "SLAMS", NA_character_),
+    ifelse(grepl("SPM|SPECIAL PURPOSE", mtype, ignore.case = TRUE), "SPM", NA_character_),
+    ifelse(grepl("TRIBAL",     mtype, ignore.case = TRUE), "Tribal",     NA_character_),
+    ifelse(grepl("INDUSTRIAL", mtype, ignore.case = TRUE), "Industrial", NA_character_)
+  )
+  df$network_program <- apply(tags, 1, function(x) paste(na.omit(x), collapse = ", "))
+  df$network_program[df$network_program == ""] <- "Other"
+  df
+}
+
+# One-time type conversion after load: caches store all-character for schema
+# stability, but coordinates must be numeric (character min/max sorts
+# alphabetically, which inverted map bounds) and dates must be Date.
+prepare_raw <- function(df) {
+  df %>%
+    mutate(
+      latitude   = suppressWarnings(as.numeric(latitude)),
+      longitude  = suppressWarnings(as.numeric(longitude)),
+      open_date  = as_date(open_date),
+      close_date = as_date(close_date)
+    ) %>%
+    classify_programs()
+}
+
 # 2. UI DEFINITION
 # ------------------------------------------------------------------------------
 ui <- page_sidebar(
@@ -91,8 +149,8 @@ ui <- page_sidebar(
     selectizeInput("counties", "Filter by County:", choices = NULL, multiple = TRUE, options = list(placeholder = 'All Counties')),
     selectizeInput("cbsas", "Filter by CBSA:", choices = NULL, multiple = TRUE, options = list(placeholder = 'All CBSAs')),
     selectizeInput("agencies", "Filter by Agency:", choices = NULL, multiple = TRUE, options = list(placeholder = 'All Agencies')),
-    selectizeInput("programs", "Network Program Level:", 
-                   choices = c("All", "SLAMS", "PAMS", "NCORE", "NATTS", "SPM (Special)", "Tribal", "Industrial"), 
+    selectizeInput("programs", "Network Program Level:",
+                   choices = c("All", "SLAMS", "NCORE", "PAMS", "NATTS", "CSN", "CASTNET", "SPM", "Tribal", "Industrial", "Other"),
                    selected = "All", multiple = TRUE, options = list(placeholder = 'All Programs')),
     checkboxGroupInput("pollutants", "Pollutants to Include:", 
                        choices = names(pollutants_default), 
@@ -106,7 +164,9 @@ ui <- page_sidebar(
                 sep = ""),
     hr(),
     actionButton("refresh", "Sync Latest Data", class = "btn-secondary btn-sm"),
-    helpText("Switching states may trigger a download if no local cache is found."),
+    helpText("Switching states may trigger a download if no local cache is found. Sync is limited to once per state every 10 minutes to conserve EPA API quota."),
+    actionButton("audit", "Audit AQS Data Reporting", class = "btn-warning btn-sm"),
+    helpText("Cross-checks every open monitor against submitted AQS annual data and flags records that exist in metadata but reported nothing (takes ~2 minutes)."),
     hr(),
     # Attribution Section
     div(style = "font-size: 0.8em; color: #7f8c8d; line-height: 1.4;",
@@ -149,9 +209,17 @@ ui <- page_sidebar(
               hr(),
               shinycssloaders::withSpinner(plotlyOutput("pollutant_plot", height = "400px"))
     ),
-    nav_panel("Detailed Data", 
+    nav_panel("Detailed Data",
               p(tags$small(class = "text-muted", "Note: CSV/Excel exports reflect your currently selected sidebar filters.")),
               shinycssloaders::withSpinner(DTOutput("table"))
+    ),
+    nav_panel("Data Audit",
+              card(
+                card_header("Metadata vs. Reported Data Audit"),
+                p("AQS monitor metadata and actual submitted data can drift apart: a monitor record may remain open in AQS even though no data has ever been reported for it (e.g., a channel created during instrument setup that was never intended to submit). This audit pulls the official AQS annual summaries for every tracked parameter and flags open monitors that reported no data in the most recent complete year. Flagged monitors are also marked with 'NO DATA' in map popups and the Detailed Data table."),
+                uiOutput("audit_summary"),
+                shinycssloaders::withSpinner(DTOutput("audit_table"))
+              )
     ),
     nav_panel("About & Methodology", 
               card(
@@ -168,13 +236,19 @@ ui <- page_sidebar(
                 p("Utilizing a smart-parsing engine, the dashboard identifies specific instrument models. For particulate matter, the system strips redundant EPA metadata to reveal core manufacturing hardware (e.g., Teledyne T640, Met One BAM, Thermo TEOM). For gaseous pollutants (Ozone, SO2, NO2), the system includes a technical decoder that intelligently maps legacy 'Instrumental' labels to specific instrumentation categories like UV Photometric and Chemiluminescence Analyzers."),
                 
                 h5("4. Multi-Parameter History Recovery"),
-                p("The database uses an expanded search algorithm to recover 100% of a network's history, handling 'Parameter Splits' such as Lead (matching both TSP STP Code 12128 and PM10 LC Code 85129) and PM2.5 (matching both Standard LC and Acceptable codes)."),
+                p("The database uses an expanded search algorithm to recover a network's history, handling 'Parameter Splits' such as Lead (matching the 2008 NAAQS design-value parameter Pb-TSP LC 14129 alongside legacy TSP STP 12128 and PM10 LC 85129) and PM2.5 (matching both Standard LC and Acceptable codes). Historical TSP (11101) is included so pre-1987 particulate sites report their true establishment dates, and NCore obligations (NOy 42600, PM10-2.5 86101) plus core meteorology (wind 61103, temperature 62101) are tracked for program audits."),
+
+                h5("4b. NAAQS Primary Designation"),
+                p("Each site is flagged with its official AQS 'NAAQS Primary Monitor' designation — the monitor whose data feeds design-value calculations. Consistent with 40 CFR 58.20(e), a Special Purpose Monitor carrying this designation is treated as regulatory rather than blanket-excluded. Site monitoring objectives (population exposure, highest concentration, source oriented, etc.) from 40 CFR Part 58 Appendix D are surfaced in popups and the data table."),
                 
                 h5("5. Network Program Intelligence"),
                 p("The dashboard intelligently classifies sites into their primary regulatory programs. By parsing the 'networks' and 'monitor_type' metadata, it distinguishes between SLAMS (State/Local), NCore (National Core), PAMS (Photochemical), NATTS (Air Toxics), and Tribal stations. This allows for professional auditing of the specific mission and funding stream of any monitor in the US."),
 
                 h5("6. Specialized National Audits (VOCs & Toxics)"),
                 p("To support specialized air quality missions, the system incorporates 'Indicator Parameters' for high-level auditing. The 'PAMS VOC' suite leverages Benzene (45201) to identify active photochemical networks, while 'Air Toxics' uses Formaldehyde (43502) as the primary indicator for NATTS and Toxics trends stations across all 50 states."),
+
+                h5("7. Reporting Audit (Metadata vs. Submitted Data)"),
+                p("The 'Audit AQS Data Reporting' tool cross-references every open monitor record against the official AQS annual summary service for the most recent complete (certifiable) data year. Monitor records that exist in AQS metadata but submitted zero observations are flagged as likely phantom records — e.g., instrument channels registered during deployment that never report — and marked with 'NO DATA' throughout the dashboard. This directly supports AQS monitor-maintenance housekeeping ahead of Annual Network Plan submissions."),
 
                 h5("Data Sources"),
                 tags$ul(
@@ -184,7 +258,7 @@ ui <- page_sidebar(
                 ),
                 footer = list(
                   p("Developed & Maintained by: Rodney Cuevas, Meteorologist (MDEQ)"),
-                  p(tags$small("Project Version: 2.1 (Elite Program Edition) - April 2026"))
+                  p(tags$small("Project Version: 2.3 (Regulatory Audit Edition) - July 2026"))
                 )
               )
     )
@@ -192,10 +266,7 @@ ui <- page_sidebar(
 )
 
 server <- function(input, output, session) {
-  
-  # Session-scoped cache for Census data
-  pop_cache <- list()
-  
+
   # Shared Constants
   status_pal <- colorFactor(c("#27ae60", "#c0392b"), domain = c("Active", "Closed"))
   
@@ -208,8 +279,9 @@ server <- function(input, output, session) {
       paste(sites$Site_Established, "to", sites$Site_Closed)
     )
     
-    # Clean up address display (Handle NA/Empty)
-    clean_addr <- if_else(is.na(sites$address) | sites$address == "", "", paste0(sites$address, ", "))
+    # Clean up address display (Handle NA/Empty), escaping AQS strings before
+    # interpolation into raw HTML
+    clean_addr <- if_else(is.na(sites$address) | sites$address == "", "", paste0(htmlEscape(sites$address), ", "))
     
     # Construct Clean EPA Search Link (bare landing page)
     epa_url <- "https://www.epa.gov/outdoor-air-quality-data/interactive-map-air-quality-monitors"
@@ -220,15 +292,17 @@ server <- function(input, output, session) {
     # Create popup content
     paste0(
       "<div style='font-family: sans-serif; min-width: 250px;'>",
-      "<h4 style='margin:0; color:", status_colors, ";'>", sites$local_site_name, "</h4>",
-      "<small style='color: #666;'>", clean_addr, sites$city_name, "</small><hr style='margin: 10px 0;'>",
+      "<h4 style='margin:0; color:", status_colors, ";'>", htmlEscape(sites$local_site_name), "</h4>",
+      "<small style='color: #666;'>", clean_addr, htmlEscape(sites$city_name), "</small><hr style='margin: 10px 0;'>",
       "<table style='width: 100%; font-size: 12px; border-collapse: collapse;'>",
       "<tr><td><b>AQS ID:</b></td><td style='text-align: right;'>", sites$state_code, "-", sites$county_code, "-", sites$site_number, "</td></tr>",
       "<tr><td><b>Status:</b></td><td style='text-align: right;'>", sites$Status, "</td></tr>",
-      "<tr><td><b>Type:</b></td><td style='text-align: right;'>", sites$monitor_type, "</td></tr>",
-      "<tr><td><b>Scale:</b></td><td style='text-align: right;'>", sites$measurement_scale, "</td></tr>",
+      "<tr><td><b>Type:</b></td><td style='text-align: right;'>", htmlEscape(sites$monitor_type), "</td></tr>",
+      "<tr><td><b>NAAQS Primary:</b></td><td style='text-align: right;'>", sites$naaqs_primary, "</td></tr>",
+      "<tr><td><b>Objective:</b></td><td style='text-align: right;'>", htmlEscape(sites$objectives), "</td></tr>",
+      "<tr><td><b>Scale:</b></td><td style='text-align: right;'>", htmlEscape(sites$measurement_scale), "</td></tr>",
       "<tr><td><b>Operated:</b></td><td style='text-align: right;'>", op_text, "</td></tr>",
-      "<tr><td><b>Agency:</b></td><td style='text-align: right;'>", sites$monitoring_agency, "</td></tr>",
+      "<tr><td><b>Agency:</b></td><td style='text-align: right;'>", htmlEscape(sites$monitoring_agency), "</td></tr>",
       "<tr><td><b>Tribal:</b></td><td style='text-align: right;'>", sites$Tribal, "</td></tr>",
       "</table><hr style='margin: 10px 0;'>",
       if_else(!is.na(sites$Active_Pollutants) & sites$Active_Pollutants != "", 
@@ -244,53 +318,200 @@ server <- function(input, output, session) {
   }
   
   # Reactive values to hold the current raw data and population
-  data_store <- reactiveValues(raw = NULL, history = NULL, pop = NA, trigger = 0)
-  
+  data_store <- reactiveValues(raw = NULL, history = NULL, pop = NA, trigger = 0,
+                               total_counties_in_state = NULL, audit_flags = NULL)
+
   # Action: Refresh Cache
   observeEvent(input$refresh, {
     state_code <- input$state
-    
+    # Shiny inputs are client-controlled; never build file paths from
+    # unvalidated input
+    req(state_code %in% state_df$stateFIPS)
+
+    # Rate-limit: full re-downloads burn shared EPA API quota
+    last_sync <- get0(state_code, envir = refresh_log, ifnotfound = NULL)
+    if (!is.null(last_sync) && difftime(Sys.time(), last_sync, units = "mins") < 10) {
+      showNotification("This state was synced less than 10 minutes ago. Using existing data.", type = "warning")
+      return()
+    }
+    assign(state_code, Sys.time(), envir = refresh_log)
+
     # 1. Force Reset Memory immediately (Triggers Spinners)
     data_store$raw <- NULL
     data_store$pop <- NA
-    pop_cache[[state_code]] <<- NULL
-    
-    # 2. Wipe physical cache file
-    cache_path <- paste0("cache/state_", state_code, ".rds")
+    if (exists(state_code, envir = pop_cache_env, inherits = FALSE)) {
+      rm(list = state_code, envir = pop_cache_env)
+    }
+
+    # 2. Wipe physical cache files (monitor data + any reporting audits)
+    cache_path <- state_cache_path(state_code)
     if (file.exists(cache_path)) {
       message(paste("Clearing cache for state-code:", state_code))
       file.remove(cache_path)
     }
-    
+    unlink(Sys.glob(file.path("cache", paste0("audit_", state_code, "_*.rds"))))
+    data_store$audit_flags <- NULL
+
     # 3. Trigger Invalidation
     data_store$trigger <- data_store$trigger + 1
     showNotification(paste("Refreshing data for State", state_code, "..."), type = "message")
   })
   
+  # Action: Audit AQS Data Reporting (metadata vs. submitted annual data)
+  observeEvent(input$audit, {
+    state_code <- input$state
+    req(state_code %in% state_df$stateFIPS)
+    req(data_store$raw)
+
+    audit_year <- default_audit_year()
+    audit_path <- audit_cache_path(state_code, audit_year)
+
+    if (file.exists(audit_path)) {
+      data_store$audit_flags <- readRDS(audit_path)
+      showNotification(paste0("Loaded cached ", audit_year, " audit for this state. Use 'Sync Latest Data' to force a fresh audit."), type = "message")
+      return()
+    }
+
+    # Rate-limit audits the same way as full syncs
+    audit_key <- paste0(state_code, "_audit")
+    last_audit <- get0(audit_key, envir = refresh_log, ifnotfound = NULL)
+    if (!is.null(last_audit) && difftime(Sys.time(), last_audit, units = "mins") < 10) {
+      showNotification("An audit for this state ran less than 10 minutes ago. Please wait.", type = "warning")
+      return()
+    }
+    assign(audit_key, Sys.time(), envir = refresh_log)
+
+    codes <- unique(unlist(pollutants_default))
+
+    # Pull the official annual summaries: one statewide call per parameter code
+    reported <- NULL
+    withProgress(message = paste0("Auditing ", audit_year, " AQS submissions"), value = 0, {
+      reported <- map_dfr(codes, function(p_code) {
+        incProgress(1 / length(codes), detail = paste("Parameter", p_code))
+        tryCatch({
+          res <- aqs_annualsummary_by_state(
+            parameter = p_code,
+            bdate = as.Date(paste0(audit_year, "-01-01")),
+            edate = as.Date(paste0(audit_year, "-12-31")),
+            stateFIPS = state_code
+          )
+          if (!is.null(res) && nrow(res) > 0) {
+            res %>%
+              filter(observation_count > 0) %>%
+              transmute(
+                county_code    = as.character(county_code),
+                site_number    = as.character(site_number),
+                parameter_code = as.character(parameter_code),
+                poc            = as.character(poc)
+              ) %>%
+              distinct()
+          } else NULL
+        }, error = function(e) NULL)
+      })
+    })
+
+    # If nothing came back at all, treat it as an API failure rather than
+    # flagging the entire network as phantom
+    if (is.null(reported) || nrow(reported) == 0) {
+      showNotification("Audit failed: no annual data returned from the AQS API. Try again later.", type = "error")
+      return()
+    }
+
+    # Open monitors that existed during the audit year but submitted nothing
+    flags <- data_store$raw %>%
+      filter(is.na(close_date),
+             !is.na(open_date),
+             open_date <= as.Date(paste0(audit_year, "-12-31"))) %>%
+      mutate(poc = as.character(poc)) %>%
+      anti_join(reported, by = c("county_code", "site_number", "parameter_code", "poc")) %>%
+      transmute(
+        state_code, county_code, site_number, parameter_code, poc,
+        local_site_name, county_name, pollutant_type,
+        open_date, last_method_description, monitor_type, network_program,
+        audit_year = .env$audit_year
+      )
+
+    saveRDS(flags, audit_path)
+    data_store$audit_flags <- flags
+    showNotification(
+      paste0("Audit complete: ", nrow(flags), " open monitor record(s) reported no ", audit_year, " data."),
+      type = if (nrow(flags) > 0) "warning" else "message", duration = 10
+    )
+  })
+
+  # Audit summary line
+  output$audit_summary <- renderUI({
+    flags <- data_store$audit_flags
+    if (is.null(flags)) {
+      return(p(class = "text-muted", "No audit has been run for this state yet. Click 'Audit AQS Data Reporting' in the sidebar."))
+    }
+    yr <- if (nrow(flags) > 0) flags$audit_year[1] else default_audit_year()
+    if (nrow(flags) == 0) {
+      p(class = "text-success", HTML(paste0("<b>&#10003; Clean:</b> every open monitor record submitted ", yr, " data to AQS.")))
+    } else {
+      p(class = "text-danger", HTML(paste0(
+        "<b>&#9888; ", nrow(flags), " open monitor record(s)</b> exist in AQS metadata but reported <b>no ", yr,
+        " data</b>. These are candidates for closure/correction via AQS monitor maintenance."
+      )))
+    }
+  })
+
+  # Audit detail table
+  output$audit_table <- renderDT({
+    flags <- data_store$audit_flags
+    shiny::validate(need(!is.null(flags), "Run the audit to see results."))
+    shiny::validate(need(nrow(flags) > 0, "No discrepancies found."))
+
+    datatable(
+      flags %>%
+        mutate(AQS_ID = paste0(state_code, "-", county_code, "-", site_number)) %>%
+        select(AQS_ID, local_site_name, county_name, pollutant_type, parameter_code,
+               poc, open_date, last_method_description, monitor_type, network_program) %>%
+        rename(Site = local_site_name, County = county_name, Pollutant = pollutant_type,
+               Parameter = parameter_code, POC = poc, `Open Since` = open_date,
+               Method = last_method_description, Type = monitor_type, Program = network_program),
+      rownames = FALSE,
+      extensions = 'Buttons',
+      options = list(pageLength = 15, scrollX = TRUE, dom = 'Bfrtip',
+                     buttons = c('copy', 'csv', 'excel'))
+    )
+  }, server = FALSE)
+
   # Synchronized Data Fetching
   observeEvent(list(input$state, data_store$trigger), {
     req(input$state)
-    
+
     state_code <- input$state
+    # Shiny inputs are client-controlled; never build file paths from
+    # unvalidated input
+    req(state_code %in% state_df$stateFIPS)
     state_name <- state_df$state[state_df$stateFIPS == state_code]
-    cache_path <- paste0("cache/state_", state_code, ".rds")
-    
-    # 1. Fetch Population (from Census API with session caching)
-    if (is.null(pop_cache[[state_code]])) {
+    cache_path <- state_cache_path(state_code)
+
+    # Reset per-state metrics so a failed lookup can't inherit the previous
+    # state's county count; reload any cached reporting audit for this state
+    data_store$total_counties_in_state <- NULL
+    audit_path <- audit_cache_path(state_code, default_audit_year())
+    data_store$audit_flags <- if (file.exists(audit_path)) readRDS(audit_path) else NULL
+
+    # 1. Fetch Population (from Census API with app-lifetime caching)
+    pop_val <- get0(state_code, envir = pop_cache_env, ifnotfound = NULL)
+    if (is.null(pop_val)) {
       tryCatch({
         pop_data <- get_estimates(geography = "state", product = "population", state = state_name, vintage = 2023)
         if ("variable" %in% colnames(pop_data)) {
            val <- pop_data$value[toupper(pop_data$variable) == "POPESTIMATE"]
-           pop_cache[[state_code]] <<- if(length(val) > 0 && !is.na(val[1])) val[1] else 0
+           pop_val <- if(length(val) > 0 && !is.na(val[1])) val[1] else 0
         } else {
-           pop_cache[[state_code]] <<- if(nrow(pop_data) > 0 && !is.na(pop_data$value[1])) pop_data$value[1] else 0
+           pop_val <- if(nrow(pop_data) > 0 && !is.na(pop_data$value[1])) pop_data$value[1] else 0
         }
       }, error = function(e) {
         showNotification(paste("Census API Error:", e$message), type = "warning")
-        pop_cache[[state_code]] <<- 0
+        pop_val <<- 0
       })
+      assign(state_code, pop_val, envir = pop_cache_env)
     }
-    data_store$pop <- pop_cache[[state_code]]
+    data_store$pop <- pop_val
     
     # 2. Load Monitoring Data
     if (file.exists(cache_path)) {
@@ -325,7 +546,12 @@ server <- function(input, output, session) {
         raw_data <- NULL
       }
     }
-    
+
+    # Convert types and classify network programs once per load
+    if (!is.null(raw_data) && nrow(raw_data) > 0) {
+      raw_data <- prepare_raw(raw_data)
+    }
+
     # 3. Fetch official county list for this state (True Denominator)
     try({
       all_counties <- aqs_counties_by_state(stateFIPS = state_code)
@@ -333,15 +559,15 @@ server <- function(input, output, session) {
         data_store$total_counties_in_state <- nrow(all_counties)
       }
     }, silent = TRUE)
-    
+
     # Update Sidebar Filters & Slider
     if (!is.null(raw_data) && nrow(raw_data) > 0) {
       updateSelectizeInput(session, "counties", choices = sort(unique(raw_data$county_name)), server = TRUE)
       updateSelectizeInput(session, "cbsas", choices = sort(unique(na.omit(raw_data$cbsa_name))), server = TRUE)
       updateSelectizeInput(session, "agencies", choices = sort(unique(na.omit(raw_data$monitoring_agency))), server = TRUE)
-      
+
       # Calculate Bounds
-      years <- year(as.Date(raw_data$open_date))
+      years <- year(raw_data$open_date)
       min_yr <- max(1950, min(years, na.rm=TRUE))
       if (is.infinite(min_yr) || is.na(min_yr)) min_yr <- 1950
       max_yr <- year(Sys.Date())
@@ -355,6 +581,14 @@ server <- function(input, output, session) {
     data_store$raw <- raw_data
   })
   
+  # UX: 'All' silently disables the program filter, so drop it as soon as a
+  # specific program is selected alongside it
+  observeEvent(input$programs, {
+    if (length(input$programs) > 1 && "All" %in% input$programs) {
+      updateSelectizeInput(session, "programs", selected = setdiff(input$programs, "All"))
+    }
+  })
+
   # Refined Data Filtering (Shared across map and charts)
   filtered_raw <- reactive({
     req(data_store$raw)
@@ -367,39 +601,25 @@ server <- function(input, output, session) {
     raw <- raw %>% filter(pollutant_type %in% input$pollutants)
     
     # 2. Universal Regulatory Filter (State-Agnostic)
+    # A monitor AQS flags as the NAAQS primary is always regulatory, even if
+    # labeled SPM (40 CFR 58.20(e): FRM/FEM SPM data >24 months is
+    # NAAQS-comparable). Otherwise exclude AQI-only PM2.5 (88502) and
+    # explicitly non-regulatory monitor types.
     if (input$reg_only) {
       raw <- raw %>%
-        filter(parameter_code != "88502") %>% # Non-reg PM2.5 standard
-        filter(!grepl("NON-REGULATORY|INDUSTRIAL|SPECIAL PURPOSE", monitor_type, ignore.case = TRUE))
+        filter(
+          (!is.na(naaqs_primary_monitor) & naaqs_primary_monitor == "Y") |
+          (parameter_code != "88502" &
+             !grepl("NON-REGULATORY|INDUSTRIAL|SPECIAL PURPOSE", monitor_type, ignore.case = TRUE))
+        )
     }
-    
-    # 3. Network Program Classification & Filter
-    raw <- raw %>%
-      mutate(
-        # Identify ALL Network Programs (Accumulation Logic)
-        prog_ncore = if_else(grepl("NCORE", networks, ignore.case = TRUE), "NCORE", NA_character_),
-        prog_pams  = if_else(grepl("PAM", networks, ignore.case = TRUE), "PAMS", NA_character_),
-        prog_natts = if_else(grepl("NATTS", networks, ignore.case = TRUE), "NATTS", NA_character_),
-        prog_csn   = if_else(grepl("CSN|STN", networks, ignore.case = TRUE), "CSN", NA_character_),
-        prog_slams = if_else(grepl("SLAMS", monitor_type, ignore.case = TRUE), "SLAMS", NA_character_),
-        prog_spm   = if_else(grepl("SPM|SPECIAL PURPOSE", monitor_type, ignore.case = TRUE), "SPM", NA_character_),
-        prog_tribal= if_else(grepl("TRIBAL", monitor_type, ignore.case = TRUE), "Tribal", NA_character_),
-        prog_ind   = if_else(grepl("INDUSTRIAL", monitor_type, ignore.case = TRUE), "Industrial", NA_character_)
-      ) %>%
-      rowwise() %>%
-      mutate(
-        # Combine all non-NA programs into a list
-        network_program = paste(na.omit(c(prog_ncore, prog_pams, prog_natts, prog_csn, prog_slams, prog_spm, prog_tribal, prog_ind)), collapse = ", "),
-        network_program = if_else(network_program == "", "Other", network_program)
-      ) %>%
-      ungroup()
-    
+
+    # 3. Network Program Filter (classification precomputed in prepare_raw)
     if (length(input$programs) > 0 && !"All" %in% input$programs) {
-      # Smart Filter: Sites appear if ANY of their programs match the selected list
-      raw <- raw %>% 
-        filter(purrr::map_lgl(network_program, function(p) {
-          any(sapply(input$programs, function(target) grepl(target, p, fixed = TRUE)))
-        }))
+      # Sites appear if ANY of their programs match the selected list
+      raw <- raw %>%
+        filter(purrr::map_lgl(strsplit(network_program, ", ", fixed = TRUE),
+                              function(p) any(input$programs %in% p)))
     }
     
     # Pre-filter for map sanity (removes the validateCoords warning)
@@ -411,7 +631,22 @@ server <- function(input, output, session) {
   # Processed Data (Refined History Logic)
   processed_history <- reactive({
     sites <- filtered_raw()
-    
+
+    # Attach reporting-audit flags (if an audit has been run) so phantom
+    # monitors are labeled in popups and the data table
+    flags <- data_store$audit_flags
+    if (!is.null(flags) && nrow(flags) > 0) {
+      sites <- sites %>%
+        left_join(
+          flags %>%
+            transmute(county_code, site_number, parameter_code,
+                      poc = as.character(poc), no_data_year = audit_year),
+          by = c("county_code", "site_number", "parameter_code", "poc")
+        )
+    } else {
+      sites$no_data_year <- NA_real_
+    }
+
     sites <- sites %>%
       as_tibble() %>%
       mutate(
@@ -436,7 +671,7 @@ server <- function(input, output, session) {
             "Fluorescence Analyzer (Thermo 43/API 100)",
           parameter_code == "42602" & grepl("CHEMILUMINESCENCE", last_method_description, ignore.case = TRUE) ~ 
             "Chemiluminescence (Thermo 42/API 200)",
-          parameter_code == "42101" & grepl("INFRARED|IR", last_method_description, ignore.case = TRUE) ~ 
+          parameter_code == "42101" & grepl("INFRARED|NDIR|\\bIR\\b", last_method_description, ignore.case = TRUE) ~
             "NDIR Gas Analyzer (Thermo 48/API 300)",
             
           # 2. Particulate Hardware Extraction
@@ -447,13 +682,15 @@ server <- function(input, output, session) {
         # Final Generic Cleanup
         instrument_name = if_else(instrument_name == "INSTRUMENTAL", "Automated Gas Analyzer", instrument_name),
         
-        # Universal Regulatory Check
+        # Universal Regulatory Check (AQS NAAQS-primary designation wins;
+        # see 40 CFR 58.20(e) for SPM comparability)
         is_reg = case_when(
+          !is.na(naaqs_primary_monitor) & naaqs_primary_monitor == "Y" ~ TRUE,
           parameter_code == "88502" ~ FALSE,
           grepl("NON-REGULATORY|INDUSTRIAL|SPECIAL PURPOSE", monitor_type, ignore.case = TRUE) ~ FALSE,
           TRUE ~ TRUE
         ),
-        
+
         # Operational Timeline Text
         date_text = if_else(is.na(close_date), 
                             paste0(open_date, " to Present"), 
@@ -461,16 +698,18 @@ server <- function(input, output, session) {
         
         # Build specific pollutant tag
         poll_tag = paste0(
-          pollutant_type, 
-          " (POC ", poc, 
+          pollutant_type,
+          " (POC ", poc,
           if_else(instrument_name != "", paste0(" - ", instrument_name), ""),
-          if_else(method_type != "", paste0(" - ", method_type), ""), 
+          if_else(method_type != "", paste0(" - ", method_type), ""),
           if_else(is_reg, "", " - Non-Reg"),
+          if_else(!is.na(no_data_year), paste0(" - ⚠ NO ", no_data_year, " DATA"), ""),
           " - [", date_text, "])"
         )
       ) %>%
-      # Filter by Year Range (Site must have been open at some point in the range)
-      filter(year(open_date) <= input$year_range[2]) %>%
+      # Filter by Year Range (Site must have been open at some point in the
+      # range; keep monitors with unknown open dates rather than dropping them)
+      filter(is.na(open_date) | year(open_date) <= input$year_range[2]) %>%
       filter(is.na(close_date) | year(close_date) >= input$year_range[1]) %>%
       
       group_by(state_code, county_code, site_number) %>%
@@ -490,6 +729,8 @@ server <- function(input, output, session) {
         network_program        = first(network_program), # Multi-program string
         networks               = first(na.omit(networks)),
         poc                    = paste(sort(unique(na.omit(poc))), collapse = ", "),
+        naaqs_primary          = if_else(any(!is.na(naaqs_primary_monitor) & naaqs_primary_monitor == "Y"), "Yes", "No"),
+        objectives             = paste(sort(unique(na.omit(monitoring_objective))), collapse = "; "),
         
         # Timeline
         Site_Established       = (if(length(na.omit(open_date)) > 0) min(open_date, na.rm = TRUE) else as.Date(NA)),
@@ -649,7 +890,7 @@ server <- function(input, output, session) {
   observeEvent(data_store$raw, {
     req(data_store$raw)
     raw <- data_store$raw
-    if (nrow(raw) > 0) {
+    if (nrow(raw) > 0 && any(!is.na(raw$latitude) & !is.na(raw$longitude))) {
       leafletProxy("map") %>%
         fitBounds(
           lng1 = min(raw$longitude, na.rm = TRUE),
@@ -715,6 +956,7 @@ server <- function(input, output, session) {
         
         # 2. Determine Fill Type for the Stacked Area
         is_reg = case_when(
+          !is.na(naaqs_primary_monitor) & naaqs_primary_monitor == "Y" ~ TRUE,
           parameter_code == "88502" ~ FALSE,
           grepl("NON-REGULATORY|INDUSTRIAL|SPECIAL PURPOSE", monitor_type, ignore.case = TRUE) ~ FALSE,
           TRUE ~ TRUE
@@ -759,7 +1001,8 @@ server <- function(input, output, session) {
           grepl("ULTRA VIOLET|UV ABSORPTION", raw_method, ignore.case = TRUE) ~ "UV Photometric (Thermo 49/API 400)",
           grepl("FLUORESCENCE", raw_method, ignore.case = TRUE) ~ "Fluorescence Analyzer (Thermo 43/API 100)",
           grepl("CHEMILUMINESCENCE", raw_method, ignore.case = TRUE) ~ "Chemiluminescence (Thermo 42/API 200)",
-          grepl("INFRARED|IR", raw_method, ignore.case = TRUE) ~ "NDIR Gas Analyzer (Thermo 48/API 300)",
+          # Word-bounded so 'IR' cannot match 'Air Sampler' etc.
+          grepl("INFRARED|NDIR|\\bIR\\b", raw_method, ignore.case = TRUE) ~ "NDIR Gas Analyzer (Thermo 48/API 300)",
           
           # 2. Standard Hardware Extraction
           grepl(" - ", raw_method) ~ {
@@ -807,21 +1050,25 @@ server <- function(input, output, session) {
   })
   
   # Data Table
+  # server = FALSE so the copy/csv/excel/pdf buttons export ALL filtered rows,
+  # not just the visible page
   output$table <- renderDT({
     hist <- processed_history()
     shiny::validate(need(nrow(hist) > 0, "No data available"))
-    
+
     # Wrap in datatable() to use formatStyle extension correctly
     datatable(
       hist %>%
         mutate(AQS_ID = paste0(state_code, "-", county_code, "-", site_number)) %>%
-        select(AQS_ID, local_site_name, county_name, Status, monitor_type, 
+        select(AQS_ID, local_site_name, county_name, Status, naaqs_primary, monitor_type, objectives,
                measurement_scale, Years_Active, Active_Pollutants, Past_Pollutants, elevation, address, poc) %>%
-        rename(Elevation = elevation, Address = address, POC = poc, `Current Pollutants` = Active_Pollutants, `Past Pollutants` = Past_Pollutants),
+        rename(`NAAQS Primary` = naaqs_primary, Objectives = objectives,
+               Elevation = elevation, Address = address, POC = poc, `Current Pollutants` = Active_Pollutants, `Past Pollutants` = Past_Pollutants),
+      rownames = FALSE,
       extensions = 'Buttons',
-      escape = FALSE,
+      escape = -c(10, 11), # Pollutant columns carry <br> markup; escape all other AQS strings
       options = list(
-        pageLength = 15, 
+        pageLength = 15,
         scrollX = TRUE,
         dom = 'Bfrtip',
         buttons = c('copy', 'csv', 'excel', 'pdf')
@@ -833,7 +1080,7 @@ server <- function(input, output, session) {
         color = styleEqual(c("Active", "Closed"), c('#145a32', '#78281f')),
         fontWeight = 'bold'
       )
-  })
+  }, server = FALSE)
   
 }
 

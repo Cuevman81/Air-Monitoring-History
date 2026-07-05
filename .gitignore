@@ -18,6 +18,7 @@ rsconnect/
 # We keep the cache folder structure but ignore state-specific data
 # Users will generate their own cache when they run the app.
 cache/state_*.rds
+cache/audit_*.rds
 !cache/state_list.rds
 MS_Raw_Monitor_Cache.rds
 

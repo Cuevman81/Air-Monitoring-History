@@ -9,7 +9,10 @@ A professional, state-agnostic R-Shiny dashboard designed for technical auditing
 ## 🔬 Core Features
 
 - **Universal State Architecture**: Dynamically scales to any US state or territory, fetching official county denominators and monitor metadata via the EPA AQS API.
-- **National Program Intelligence**: Automatically classifies and audits monitors by regulatory program, including **NCore** (Flagship Multipollutant), **PAMS** (Photochemical), **NATTS** (Air Toxics), and **CSN/Speciation** networks.
+- **National Program Intelligence**: Automatically classifies and audits monitors by regulatory program, including **NCore** (Flagship Multipollutant), **PAMS** (Photochemical), **NATTS** (Air Toxics), **CSN/Speciation**, and **CASTNET** networks.
+- **NAAQS Primary Designation**: Surfaces the official AQS `naaqs_primary_monitor` flag (the design-value monitor) and 40 CFR Part 58 Appendix D monitoring objectives in popups and the data table. Special Purpose Monitors carrying the NAAQS-primary flag are treated as regulatory per 40 CFR 58.20(e).
+- **Full Historical Recovery**: Includes Pb-TSP LC (14129, the 2008 Pb NAAQS design-value parameter), historical **TSP (11101)** for pre-1987 particulate site histories, NCore trace parameters (NOy, PM10-2.5), and core meteorology (wind, temperature).
+- **Reporting Audit**: On-demand cross-check of AQS monitor metadata against submitted annual summary data — flags open monitor records that reported zero observations in the most recent complete year (phantom records), supporting AQS monitor-maintenance housekeeping ahead of Annual Network Plan submissions.
 - **Hardware-First Technical Audit**: Utilizes a sophisticated parsing engine to identify specific manufacturer hardware (e.g., **Teledyne T640**, **Met One BAM**, **Thermo TEOM**).
 - **Specialized Network Auditing**: Integrated indicators for **VOC chemistry** (Benzene) and **Air Toxics** (Formaldehyde) trends.
 - **Gaseous Hardware Decoder**: Intelligently maps legacy EPA "Instrumental" labels to specific scientific categories such as **UV Photometric** and **Chemiluminescence** Analyzers.
@@ -39,12 +42,21 @@ Open R and run:
 ```r
 install.packages(c("shiny", "bslib", "dplyr", "purrr", "lubridate", "ggplot2", 
                    "plotly", "leaflet", "leaflet.extras", "DT", "RAQSAPI", 
-                   "bsicons", "shinycssloaders", "tidycensus", "tidyr"))
+                   "bsicons", "shinycssloaders", "tidycensus", "tidyr",
+                   "htmltools", "htmlwidgets"))
 ```
 
 ### 4. Run the App
 ```r
 shiny::runApp()
+```
+
+### 5. Deploying (shinyapps.io)
+Do **not** bundle your `.Renviron` with the deployment — pass credentials as server-side
+environment variables instead so keys never ship inside the app bundle:
+
+```r
+rsconnect::deployApp(envVars = c("AQS_EMAIL", "AQS_KEY", "CENSUS_API_KEY"))
 ```
 
 ---
@@ -57,4 +69,4 @@ This project leverages the following technical resources:
 - **Hardware Parsing Engine**: Custom regex-based logic to extract technical equipment models from scientific method descriptions.
 
 **Maintained by**: Rodney Cuevas, Meteorologist (RCuevas@mdeq.ms.gov)
-**Last Updated**: April 2026
+**Last Updated**: July 2026 (v2.3 Regulatory Audit Edition)
