@@ -8,7 +8,7 @@ A professional, state-agnostic R-Shiny dashboard designed for technical auditing
 
 ## 🔬 Core Features
 
-- **Universal State Architecture**: Dynamically scales to any US state or territory, fetching official county denominators and monitor metadata via the EPA AQS API.
+- **Universal State Architecture**: Dynamically scales to any US state, plus DC, Puerto Rico and the US Virgin Islands, fetching official county denominators and monitor metadata via the EPA AQS API.
 - **National Program Intelligence**: Automatically classifies and audits monitors by regulatory program, including **NCore** (Flagship Multipollutant), **PAMS** (Photochemical), **NATTS** (Air Toxics), **CSN/Speciation**, and **CASTNET** networks.
 - **NAAQS Primary Designation**: Surfaces the official AQS `naaqs_primary_monitor` flag (the design-value monitor) and 40 CFR Part 58 Appendix D monitoring objectives in popups and the data table. Special Purpose Monitors carrying the NAAQS-primary flag are treated as regulatory, consistent with 40 CFR 58.20(c) (FRM/FEM SPM data from more than 24 months of operation are NAAQS-comparable).
 - **Full Historical Recovery**: Includes Pb-TSP LC (14129, the 2008 Pb NAAQS design-value parameter), historical **TSP (11101)** for pre-1987 particulate site histories, NCore trace parameters (NOy, PM10-2.5), and core meteorology (wind, temperature).
@@ -24,7 +24,7 @@ To run this dashboard on your local machine, follow these steps:
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/[your-username]/Air-Monitoring-History.git
+git clone https://github.com/Cuevman81/Air-Monitoring-History.git
 cd Air-Monitoring-History
 ```
 
@@ -69,7 +69,8 @@ source("deploy.R")
 `deploy.R` handles a known issue: terra 1.9-34 (a transitive dependency via
 leaflet → raster) fails to compile against the GDAL 3.4.1 on shinyapps.io's
 build image, so the script pins terra to 1.8-86 in the deployment manifest.
-Once a fixed terra release ships, `TERRA_PIN` can be removed from `deploy.R`.
+Once a fixed terra release ships, the pin (`TERRA_PIN` and step 3 of
+`deploy.R`) can be removed.
 
 If you migrate to Posit Connect, drop `aqs.env` from the bundle and pass
 credentials with `deployApp(envVars = c("AQS_EMAIL", "AQS_KEY"))` instead.
