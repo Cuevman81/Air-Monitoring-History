@@ -293,6 +293,12 @@ scenario("#2/#4/#9 main view", {
           all(sapply(canvas, grepl, x = mp, fixed = TRUE)) &&
             grepl("Esri.WorldImagery", mp, fixed = TRUE) && grepl("Esri.WorldGrayCanvas", mp, fixed = TRUE) &&
             !grepl("carto", mp, ignore.case = TRUE) && grepl('"maxNativeZoom":16', mp, fixed = TRUE))
+    # Esri's terms: every Esri layer credits "Powered by Esri" plus its sources
+    tiles <- Filter(function(cl) cl$method %in% c("addTiles", "addProviderTiles"),
+                    fromJSON(mp, simplifyVector = FALSE)$x$calls)
+    attrs <- vapply(tiles, function(cl) cl$args[[4]]$attribution %||% "", "")
+    check("map: every Esri layer credits \"Powered by Esri\"",
+          length(tiles) == 5 && all(startsWith(attrs, "Powered by Esri | ")), paste(length(tiles), "tile layers"))
 
     h <- processed_history()
     gp <- h$Active_Pollutants[h$local_site_name == "Gulfport SPM"]

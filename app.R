@@ -909,16 +909,21 @@ server <- function(input, output, session) {
     # so Light/Dark use Esri's keyless Canvas services (base + labels layer).
     # Canvas tiles exist only up to zoom 16 (deeper zooms return a "Map data
     # not yet available" image), so Leaflet upscales zoom-16 tiles past that.
+    # Esri's terms require "Powered by Esri" plus each service's own source
+    # line (its copyrightText at .../MapServer?f=json). Base and labels share
+    # one string, which Leaflet shows once.
     esri_canvas <- function(service) paste0(
       "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/", service, "/MapServer/tile/{z}/{y}/{x}")
-    esri_attr <- "Tiles &copy; Esri &mdash; Esri, HERE, Garmin, &copy; OpenStreetMap contributors, and the GIS user community"
+    esri_attr <- "Powered by Esri | Esri, HERE, Garmin, &copy; OpenStreetMap contributors, and the GIS user community"
+    esri_imagery_attr <- "Powered by Esri | Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community"
     esri_opts <- tileOptions(maxNativeZoom = 16, maxZoom = 18)
     leaflet() %>%
       addTiles(esri_canvas("World_Light_Gray_Base"), attribution = esri_attr, options = esri_opts, group = "Modern Light") %>%
       addTiles(esri_canvas("World_Light_Gray_Reference"), attribution = esri_attr, options = esri_opts, group = "Modern Light") %>%
       addTiles(esri_canvas("World_Dark_Gray_Base"), attribution = esri_attr, options = esri_opts, group = "Dark Mode") %>%
       addTiles(esri_canvas("World_Dark_Gray_Reference"), attribution = esri_attr, options = esri_opts, group = "Dark Mode") %>%
-      addProviderTiles(providers$Esri.WorldImagery, group = "Satellite") %>%
+      addProviderTiles(providers$Esri.WorldImagery, group = "Satellite",
+                       options = providerTileOptions(attribution = esri_imagery_attr)) %>%
       addLayersControl(
         baseGroups = c("Modern Light", "Dark Mode", "Satellite"),
         overlayGroups = c("Active Sites", "Closed Sites"),
