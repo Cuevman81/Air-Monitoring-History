@@ -1,6 +1,8 @@
 # --- Security & Privacy ---
 # NEVER upload your API keys to GitHub
 .Renviron
+# Temporary AQS credentials that deploy.R writes for the shinyapps.io bundle
+aqs.env
 
 # --- RStudio & Local Metadata ---
 .Rhistory

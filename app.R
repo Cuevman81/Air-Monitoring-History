@@ -21,12 +21,19 @@ library(htmlwidgets)
 
 # 1. GLOBAL CONFIGURATION
 # ------------------------------------------------------------------------------
-# Load local environment variables (.Renviron)
-if (file.exists(".Renviron")) readRenviron(".Renviron")
+# Load local environment variables. shinyapps.io has no server-side env vars,
+# so deploy.R ships the AQS credentials in the bundle as 'aqs.env' (.Renviron
+# format, git-ignored, written from ~/.Renviron at deploy time and deleted
+# afterwards). readRenviron() accepts any path. A project .Renviron still
+# works for local runs.
+for (.env_file in c(".Renviron", "aqs.env")) {
+  if (file.exists(.env_file)) readRenviron(.env_file)
+}
 
-# EPA AQS Credentials from .Renviron (Recommended)
+# EPA AQS Credentials (only their presence is ever logged)
 my_email <- Sys.getenv("AQS_EMAIL")
 my_key   <- Sys.getenv("AQS_KEY")
+message("[startup] AQS credentials present: ", nzchar(my_email) && nzchar(my_key))
 
 # Rotate or set these in .Renviron for security
 if (my_email == "" || my_key == "") {
@@ -35,12 +42,9 @@ if (my_email == "" || my_key == "") {
 }
 aqs_credentials(username = my_email, key = my_key)
 
-# Census Configuration
-if (Sys.getenv("CENSUS_API_KEY") != "") {
-  census_api_key(Sys.getenv("CENSUS_API_KEY"))
-} else {
-  message("Warning: CENSUS_API_KEY not found in environment.")
-}
+# Census: population comes from get_estimates(vintage = 2023), which reads a
+# public Census CSV. tidycensus uses CENSUS_API_KEY only for pre-2020
+# estimates, so no Census key is needed.
 
 # Ensure cache directory exists
 if (!dir.exists("cache")) dir.create("cache")

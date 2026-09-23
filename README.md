@@ -29,13 +29,15 @@ cd Air-Monitoring-History
 ```
 
 ### 2. Configure API Credentials
-The dashboard requires access to the **EPA AQS API** and the **US Census Bureau API**. Create a file named `.Renviron` in the root directory and add your keys:
+The dashboard requires an **EPA AQS API** account. Create a file named `.Renviron` in the root directory (or put the same lines in `~/.Renviron`) and add your credentials:
 
 ```text
 AQS_EMAIL="your_email@example.com"
 AQS_KEY="your_epa_aqs_key"
-CENSUS_API_KEY="your_census_bureau_key"
 ```
+
+No Census API key is needed: population comes from the Census Bureau's public
+2023 Vintage estimates file, which `tidycensus::get_estimates()` reads without a key.
 
 ### 3. Install Dependencies
 Open R and run:
@@ -52,10 +54,13 @@ shiny::runApp()
 ```
 
 ### 5. Deploying (shinyapps.io)
-shinyapps.io does not support server-side environment variables, so the `.Renviron`
-file must be included in the deployment bundle (it is visible only to your
-shinyapps.io account — never commit it to git). A `.rscignore` file keeps local
-data, docs, and scripts out of the bundle. Deploy from the R console:
+shinyapps.io does not support server-side environment variables, so the AQS
+credentials must ship inside the deployment bundle (it is visible only to your
+shinyapps.io account and is never served to visitors). `deploy.R` copies only
+`AQS_EMAIL` and `AQS_KEY` from `~/.Renviron` into a temporary, git-ignored
+`aqs.env`, bundles it with `app.R` and the `cache/` files, and deletes it when the
+deploy ends. The app logs `[startup] AQS credentials present: TRUE` when it
+loads them (see `rsconnect::showLogs()`). Deploy from the R console:
 
 ```r
 source("deploy.R")
@@ -64,10 +69,10 @@ source("deploy.R")
 `deploy.R` handles a known issue: terra 1.9-34 (a transitive dependency via
 leaflet → raster) fails to compile against the GDAL 3.4.1 on shinyapps.io's
 build image, so the script pins terra to 1.8-86 in the deployment manifest.
-Once a fixed terra release ships, plain `rsconnect::deployApp()` will work again.
+Once a fixed terra release ships, `TERRA_PIN` can be removed from `deploy.R`.
 
-If you migrate to Posit Connect, exclude `.Renviron` from the bundle and pass
-credentials with `deployApp(envVars = c("AQS_EMAIL", "AQS_KEY", "CENSUS_API_KEY"))` instead.
+If you migrate to Posit Connect, drop `aqs.env` from the bundle and pass
+credentials with `deployApp(envVars = c("AQS_EMAIL", "AQS_KEY"))` instead.
 
 ---
 

@@ -1,8 +1,12 @@
 # Files excluded from the shinyapps.io deployment bundle (rsconnect >= 1.0).
-# NOTE: shinyapps.io does NOT support server-side envVars, so .Renviron must
-# ship in the bundle (it is visible only to this shinyapps.io account).
-# If you ever migrate to Posit Connect, exclude .Renviron here and use
-#   rsconnect::deployApp(envVars = c("AQS_EMAIL", "AQS_KEY", "CENSUS_API_KEY"))
+# deploy.R bundles an explicit file list (app.R, aqs.env, cache/*.rds); this
+# file only matters for a plain rsconnect::deployApp().
+# NOTE: shinyapps.io does NOT support server-side envVars, so the AQS
+# credentials ship as aqs.env, which deploy.R writes from ~/.Renviron and
+# deletes afterwards (visible only to this shinyapps.io account). A project
+# .Renviron is never bundled. If you ever migrate to Posit Connect, use
+#   rsconnect::deployApp(envVars = c("AQS_EMAIL", "AQS_KEY"))
+.Renviron
 .Rhistory
 .git
 deploy.R
