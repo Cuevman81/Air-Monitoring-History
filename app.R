@@ -89,6 +89,17 @@ default_audit_year <- function() year(Sys.Date()) - 1
 # "SPECIAL PURPOSE" (kept for older records).
 NON_REG_MONITOR_TYPES <- "\\bSPM\\b|SPECIAL PURPOSE|NON-REGULATORY|INDUSTRIAL"
 
+# History charts loop once per year, so clamp the client-sent slider range to
+# the slider's own bounds (inputs are client-controlled)
+safe_year_seq <- function(yr) {
+  yr <- suppressWarnings(as.numeric(yr))
+  req(length(yr) == 2, !anyNA(yr))
+  lo <- max(1950, floor(min(yr)))
+  hi <- min(year(Sys.Date()), ceiling(max(yr)))
+  req(lo <= hi)
+  seq(lo, hi)
+}
+
 # Fetch States list (Static Reference for high-reliability startup)
 state_df <- data.frame(
   state = c("Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", 
@@ -958,7 +969,7 @@ server <- function(input, output, session) {
       mutate(open = as_date(open_date), close = as_date(close_date))
     
     # Sync with Slider Range
-    years_seq <- seq(input$year_range[1], input$year_range[2])
+    years_seq <- safe_year_seq(input$year_range)
     
     trend_data <- map_df(years_seq, function(y) {
       y_date_start <- as_date(paste0(y, "-01-01"))
@@ -1017,7 +1028,7 @@ server <- function(input, output, session) {
         )
       )
     
-    years_seq <- seq(input$year_range[1], input$year_range[2])
+    years_seq <- safe_year_seq(input$year_range)
     
     # Calculate active monitors per year AND fill category
     mix_data <- map_df(years_seq, function(y) {
