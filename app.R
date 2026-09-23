@@ -323,7 +323,8 @@ server <- function(input, output, session) {
   
   # Reactive values to hold the current raw data and population
   data_store <- reactiveValues(raw = NULL, history = NULL, pop = NA, trigger = 0,
-                               total_counties_in_state = NULL, audit_flags = NULL)
+                               total_counties_in_state = NULL, audit_flags = NULL,
+                               sync_pending = NULL)
 
   # Action: Refresh Cache
   observeEvent(input$refresh, {
@@ -347,12 +348,10 @@ server <- function(input, output, session) {
       rm(list = state_code, envir = pop_cache_env)
     }
 
-    # 2. Wipe physical cache files (monitor data + any reporting audits)
-    cache_path <- state_cache_path(state_code)
-    if (file.exists(cache_path)) {
-      message(paste("Clearing cache for state-code:", state_code))
-      file.remove(cache_path)
-    }
+    # 2. Force a fresh download. The saved monitor cache stays on disk until a
+    # complete download replaces it, so a partial AQS answer can't wipe good
+    # data. Reporting audits are cleared.
+    data_store$sync_pending <- state_code
     unlink(Sys.glob(file.path("cache", paste0("audit_", state_code, "_*.rds"))))
     data_store$audit_flags <- NULL
 
@@ -532,14 +531,21 @@ server <- function(input, output, session) {
     }
     data_store$pop <- pop_val
     
-    # 2. Load Monitoring Data
-    if (file.exists(cache_path)) {
+    # 2. Load Monitoring Data ('Sync Latest Data' forces a download)
+    forced <- identical(data_store$sync_pending, state_code)
+    data_store$sync_pending <- NULL
+    if (file.exists(cache_path) && !forced) {
       raw_data <- readRDS(cache_path)
     } else {
       message(paste("Downloading data for state:", state_code))
       start_date <- as.Date("1950-01-01")
       end_date   <- Sys.Date()
-      
+
+      # A code AQS did not answer for is unknown, not empty: record it so a
+      # partial download is never cached as the state's data. Never show or
+      # log the error text (it carries the request URL with the AQS key).
+      failed <- character(0)
+
       # Fetch monitors for each pollutant name, potentially trying multiple codes
       raw_data <- map_dfr(names(pollutants_default), function(p_name) {
         codes <- pollutants_default[[p_name]]
@@ -554,11 +560,25 @@ server <- function(input, output, session) {
               return(data %>% mutate(across(everything(), as.character)))
             }
             return(NULL)
-          }, error = function(e) { return(NULL) })
+          }, error = function(e) { failed <<- c(failed, p_code); return(NULL) })
         })
       })
-      
-      if (!is.null(raw_data) && nrow(raw_data) > 0) {
+
+      if (length(failed) > 0) {
+        message("[aqs] state ", state_code, ": no answer for parameter(s) ", paste(failed, collapse = ", "))
+        if (file.exists(cache_path)) {
+          showNotification(paste0("Sync incomplete: AQS did not answer for parameter(s) ",
+                                  paste(failed, collapse = ", "),
+                                  ". Keeping the previously saved data; try 'Sync Latest Data' later."),
+                           type = "warning", duration = NULL)
+          raw_data <- readRDS(cache_path)
+        } else {
+          showNotification(paste0("AQS did not answer for parameter(s) ", paste(failed, collapse = ", "),
+                                  ". Showing partial data (not saved); try 'Sync Latest Data' later."),
+                           type = "warning", duration = NULL)
+          if (is.null(raw_data) || nrow(raw_data) == 0) raw_data <- NULL
+        }
+      } else if (!is.null(raw_data) && nrow(raw_data) > 0) {
         saveRDS(raw_data, cache_path)
       } else {
         showNotification(paste("No monitoring data found for State", state_code), type = "warning")
