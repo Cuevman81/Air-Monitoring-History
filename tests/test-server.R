@@ -131,8 +131,10 @@ POPUPS <- character(0)                 # every map popup the server built
 addCircleMarkers <- function(map, ..., popup = NULL) { POPUPS <<- c(POPUPS, seen(popup)); map }
 
 # --- Harness helpers -----------------------------------------------------------
-# Copy app.R to a fresh temp dir (optionally with cache files and aqs.env),
-# source it, and return the app object. Fresh globals each time.
+# Copy app.R to a fresh temp dir (optionally with cache files and aqs.env) and
+# load it the way shiny::runApp does: into its own environment whose parent
+# is the global environment (so the mocks above are still found first).
+# Fresh app globals each time; APPENV holds the latest one.
 load_app <- function(cache = list(), env_file = TRUE) {
   dir <- tempfile("amh-"); dir.create(file.path(dir, "cache"), recursive = TRUE)
   file.copy(file.path(app_src, "app.R"), dir)
@@ -141,9 +143,11 @@ load_app <- function(cache = list(), env_file = TRUE) {
   for (f in names(cache)) saveRDS(cache[[f]], file.path(dir, "cache", f))
   setwd(dir)
   Sys.unsetenv(c("AQS_EMAIL", "AQS_KEY"))
-  app <- withCallingHandlers(source("app.R", local = FALSE)$value,
-                             message = function(m) { LOG <<- c(LOG, conditionMessage(m)); invokeRestart("muffleMessage") })
-  list(dir = dir, app = app)
+  appenv <- new.env(parent = globalenv())
+  withCallingHandlers(sys.source("app.R", envir = appenv),
+                      message = function(m) { LOG <<- c(LOG, conditionMessage(m)); invokeRestart("muffleMessage") })
+  APPENV <<- appenv
+  list(dir = dir, app = shinyApp(appenv$ui, appenv$server))
 }
 # A pre-seeded cache in the app's format (all character, grouped by pollutant)
 as_cache <- function(df) {
@@ -362,7 +366,7 @@ scenario("#6 county cache", {
 # --- 7. #8 About footer renders as a real card footer ---------------------------
 scenario("#8 footer", {
   a <- load_app(SEEDED)
-  html <- seen(htmltools::renderTags(ui)$html)
+  html <- seen(htmltools::renderTags(APPENV$ui)$html)
   check("#8 About footer is a card-footer, not an attribute",
         grepl("card-footer", html) && !grepl('footer="list(', html, fixed = TRUE) &&
           grepl("Developed &amp; Maintained by", html))
