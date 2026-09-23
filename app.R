@@ -83,6 +83,12 @@ audit_cache_path <- function(state_code, audit_year) {
 # prior calendar year is the newest year we can fairly hold monitors to.
 default_audit_year <- function() year(Sys.Date()) - 1
 
+# AQS monitor types (AQS "Monitor Types" code table): EPA, INDUSTRIAL,
+# NON-EPA FEDERAL, OTHER, SLAMS, SPM, TRIBAL. Types that are never regulatory
+# unless AQS flags the monitor as NAAQS primary. AQS writes SPM, not
+# "SPECIAL PURPOSE" (kept for older records).
+NON_REG_MONITOR_TYPES <- "\\bSPM\\b|SPECIAL PURPOSE|NON-REGULATORY|INDUSTRIAL"
+
 # Fetch States list (Static Reference for high-reliability startup)
 state_df <- data.frame(
   state = c("Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", 
@@ -243,7 +249,7 @@ ui <- page_sidebar(
                 p("The database uses an expanded search algorithm to recover a network's history, handling 'Parameter Splits' such as Lead (matching the 2008 NAAQS design-value parameter Pb-TSP LC 14129 alongside legacy TSP STP 12128 and PM10 LC 85129) and PM2.5 (matching both Standard LC and Acceptable codes). Historical TSP (11101) is included so pre-1987 particulate sites report their true establishment dates, and NCore obligations (NOy 42600, PM10-2.5 86101) plus core meteorology (wind 61103, temperature 62101) are tracked for program audits."),
 
                 h5("4b. NAAQS Primary Designation"),
-                p("Each site is flagged with its official AQS 'NAAQS Primary Monitor' designation — the monitor whose data feeds design-value calculations. Consistent with 40 CFR 58.20(e), a Special Purpose Monitor carrying this designation is treated as regulatory rather than blanket-excluded. Site monitoring objectives (population exposure, highest concentration, source oriented, etc.) from 40 CFR Part 58 Appendix D are surfaced in popups and the data table."),
+                p("Each site is flagged with its official AQS 'NAAQS Primary Monitor' designation — the monitor whose data feeds design-value calculations. Consistent with 40 CFR 58.20(c), a Special Purpose Monitor carrying this designation is treated as regulatory rather than blanket-excluded. Site monitoring objectives (population exposure, highest concentration, source oriented, etc.) from 40 CFR Part 58 Appendix D are surfaced in popups and the data table."),
                 
                 h5("5. Network Program Intelligence"),
                 p("The dashboard intelligently classifies sites into their primary regulatory programs. By parsing the 'networks' and 'monitor_type' metadata, it distinguishes between SLAMS (State/Local), NCore (National Core), PAMS (Photochemical), NATTS (Air Toxics), and Tribal stations. This allows for professional auditing of the specific mission and funding stream of any monitor in the US."),
@@ -641,7 +647,7 @@ server <- function(input, output, session) {
     
     # 2. Universal Regulatory Filter (State-Agnostic)
     # A monitor AQS flags as the NAAQS primary is always regulatory, even if
-    # labeled SPM (40 CFR 58.20(e): FRM/FEM SPM data >24 months is
+    # labeled SPM (40 CFR 58.20(c): FRM/FEM SPM data >24 months is
     # NAAQS-comparable). Otherwise exclude AQI-only PM2.5 (88502) and
     # explicitly non-regulatory monitor types.
     if (input$reg_only) {
@@ -649,7 +655,7 @@ server <- function(input, output, session) {
         filter(
           (!is.na(naaqs_primary_monitor) & naaqs_primary_monitor == "Y") |
           (parameter_code != "88502" &
-             !grepl("NON-REGULATORY|INDUSTRIAL|SPECIAL PURPOSE", monitor_type, ignore.case = TRUE))
+             !grepl(NON_REG_MONITOR_TYPES, monitor_type, ignore.case = TRUE))
         )
     }
 
@@ -722,11 +728,11 @@ server <- function(input, output, session) {
         instrument_name = if_else(instrument_name == "INSTRUMENTAL", "Automated Gas Analyzer", instrument_name),
         
         # Universal Regulatory Check (AQS NAAQS-primary designation wins;
-        # see 40 CFR 58.20(e) for SPM comparability)
+        # see 40 CFR 58.20(c) for SPM comparability)
         is_reg = case_when(
           !is.na(naaqs_primary_monitor) & naaqs_primary_monitor == "Y" ~ TRUE,
           parameter_code == "88502" ~ FALSE,
-          grepl("NON-REGULATORY|INDUSTRIAL|SPECIAL PURPOSE", monitor_type, ignore.case = TRUE) ~ FALSE,
+          grepl(NON_REG_MONITOR_TYPES, monitor_type, ignore.case = TRUE) ~ FALSE,
           TRUE ~ TRUE
         ),
 
@@ -997,7 +1003,7 @@ server <- function(input, output, session) {
         is_reg = case_when(
           !is.na(naaqs_primary_monitor) & naaqs_primary_monitor == "Y" ~ TRUE,
           parameter_code == "88502" ~ FALSE,
-          grepl("NON-REGULATORY|INDUSTRIAL|SPECIAL PURPOSE", monitor_type, ignore.case = TRUE) ~ FALSE,
+          grepl(NON_REG_MONITOR_TYPES, monitor_type, ignore.case = TRUE) ~ FALSE,
           TRUE ~ TRUE
         ),
         
