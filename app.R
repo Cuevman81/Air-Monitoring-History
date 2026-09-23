@@ -741,8 +741,10 @@ server <- function(input, output, session) {
                             paste0(open_date, " to Present"), 
                             paste0(open_date, " to ", close_date)),
         
-        # Build specific pollutant tag
-        poll_tag = paste0(
+        # Build specific pollutant tag (escaped: it carries the AQS method
+        # name into popups and the unescaped table columns; the <br> joins
+        # are added afterwards)
+        poll_tag = htmlEscape(paste0(
           pollutant_type,
           " (POC ", poc,
           if_else(instrument_name != "", paste0(" - ", instrument_name), ""),
@@ -750,7 +752,7 @@ server <- function(input, output, session) {
           if_else(is_reg, "", " - Non-Reg"),
           if_else(!is.na(no_data_year), paste0(" - ⚠ NO ", no_data_year, " DATA"), ""),
           " - [", date_text, "])"
-        )
+        ))
       ) %>%
       # Filter by Year Range (Site must have been open at some point in the
       # range; keep monitors with unknown open dates rather than dropping them)
@@ -841,8 +843,8 @@ server <- function(input, output, session) {
       
       HTML(paste0(
         "<div style='font-size: 0.8em;'>",
-        "<b>Oldest Active:</b> ", oldest$local_site_name, " (", year(oldest$Site_Established), ")<br>",
-        "<b>Newest Overall:</b> ", newest$local_site_name, " (", year(newest$Site_Established), ")",
+        "<b>Oldest Active:</b> ", htmlEscape(oldest$local_site_name), " (", year(oldest$Site_Established), ")<br>",
+        "<b>Newest Overall:</b> ", htmlEscape(newest$local_site_name), " (", year(newest$Site_Established), ")",
         "</div>"
       ))
     } else {
