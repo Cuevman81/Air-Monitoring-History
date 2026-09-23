@@ -100,6 +100,9 @@ safe_year_seq <- function(yr) {
   seq(lo, hi)
 }
 
+# Visitor-facing time stamps (shinyapps.io runs in UTC)
+format_stamp <- function(x) format(x, "%Y-%m-%d %H:%M UTC", tz = "UTC")
+
 # Fetch States list (Static Reference for high-reliability startup)
 state_df <- data.frame(
   state = c("Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", 
@@ -186,6 +189,7 @@ ui <- page_sidebar(
                 sep = ""),
     hr(),
     actionButton("refresh", "Sync Latest Data", class = "btn-secondary btn-sm"),
+    uiOutput("data_age"),
     helpText("Switching states may trigger a download if no local cache is found. Sync is limited to once per state every 10 minutes to conserve EPA API quota."),
     actionButton("audit", "Audit AQS Data Reporting", class = "btn-warning btn-sm"),
     helpText("Cross-checks every open monitor against submitted AQS annual data and flags records that exist in metadata but reported nothing (takes ~2 minutes)."),
@@ -342,7 +346,7 @@ server <- function(input, output, session) {
   # Reactive values to hold the current raw data and population
   data_store <- reactiveValues(raw = NULL, history = NULL, pop = NA, trigger = 0,
                                total_counties_in_state = NULL, audit_flags = NULL,
-                               sync_pending = NULL)
+                               fetched = NULL, sync_pending = NULL)
 
   # Action: Refresh Cache
   observeEvent(input$refresh, {
@@ -467,6 +471,7 @@ server <- function(input, output, session) {
         audit_year = .env$audit_year
       )
 
+    attr(flags, "run") <- Sys.time()
     saveRDS(flags, audit_path)
     data_store$audit_flags <- flags
     showNotification(
@@ -482,13 +487,18 @@ server <- function(input, output, session) {
       return(p(class = "text-muted", "No audit has been run for this state yet. Click 'Audit AQS Data Reporting' in the sidebar."))
     }
     yr <- if (nrow(flags) > 0) flags$audit_year[1] else default_audit_year()
+    run <- attr(flags, "run")
+    run_note <- p(class = "text-muted small",
+                  if (is.null(run)) "Saved audit (run date not recorded). 'Sync Latest Data' clears it so a fresh audit can run."
+                  else paste0("Audit run ", format_stamp(run), "."))
     if (nrow(flags) == 0) {
-      p(class = "text-success", HTML(paste0("<b>&#10003; Clean:</b> every open monitor record submitted ", yr, " data to AQS.")))
+      tagList(p(class = "text-success", HTML(paste0("<b>&#10003; Clean:</b> every open monitor record submitted ", yr, " data to AQS."))),
+              run_note)
     } else {
-      p(class = "text-danger", HTML(paste0(
+      tagList(p(class = "text-danger", HTML(paste0(
         "<b>&#9888; ", nrow(flags), " open monitor record(s)</b> exist in AQS metadata but reported <b>no ", yr,
         " data</b>. These are candidates for closure/correction via AQS monitor maintenance."
-      )))
+      ))), run_note)
     }
   })
 
@@ -512,6 +522,15 @@ server <- function(input, output, session) {
                      buttons = c('copy', 'csv', 'excel'))
     )
   }, server = FALSE)
+
+  # Age of the monitor metadata on screen (shinyapps.io restores the deployed
+  # cache on every restart, so this can be much older than the visit)
+  output$data_age <- renderUI({
+    req(data_store$raw)
+    fetched <- data_store$fetched
+    helpText(if (is.null(fetched)) "AQS metadata: saved snapshot (download date not recorded)."
+             else paste0("AQS metadata downloaded ", format_stamp(fetched), "."))
+  })
 
   # Synchronized Data Fetching
   observeEvent(list(input$state, data_store$trigger), {
@@ -581,6 +600,7 @@ server <- function(input, output, session) {
           }, error = function(e) { failed <<- c(failed, p_code); return(NULL) })
         })
       })
+      if (!is.null(raw_data) && nrow(raw_data) > 0) attr(raw_data, "fetched") <- Sys.time()
 
       if (length(failed) > 0) {
         message("[aqs] state ", state_code, ": no answer for parameter(s) ", paste(failed, collapse = ", "))
@@ -603,6 +623,7 @@ server <- function(input, output, session) {
         raw_data <- NULL
       }
     }
+    data_store$fetched <- attr(raw_data, "fetched")
 
     # Convert types and classify network programs once per load
     if (!is.null(raw_data) && nrow(raw_data) > 0) {
