@@ -120,8 +120,9 @@ state_df <- data.frame(
 state_choices <- setNames(state_df$stateFIPS, state_df$state)
 
 # App-lifetime caches shared across all sessions in this R process
-pop_cache_env <- new.env(parent = emptyenv()) # Census population by state FIPS
-refresh_log   <- new.env(parent = emptyenv()) # Last "Sync Latest Data" time by state FIPS
+pop_cache_env    <- new.env(parent = emptyenv()) # Census population by state FIPS
+county_cache_env <- new.env(parent = emptyenv()) # AQS county count by state FIPS
+refresh_log      <- new.env(parent = emptyenv()) # Last "Sync Latest Data" time by state FIPS
 
 # Vectorized network-program classification (runs once per data load, not per filter change)
 classify_programs <- function(df) {
@@ -608,13 +609,19 @@ server <- function(input, output, session) {
       raw_data <- prepare_raw(raw_data)
     }
 
-    # 3. Fetch official county list for this state (True Denominator)
-    try({
-      all_counties <- aqs_counties_by_state(stateFIPS = state_code)
-      if (!is.null(all_counties)) {
-        data_store$total_counties_in_state <- nrow(all_counties)
-      }
-    }, silent = TRUE)
+    # 3. Official county count for this state (True Denominator), cached per
+    # R process like population so cached visits cost no AQS call
+    n_cty <- get0(state_code, envir = county_cache_env, ifnotfound = NULL)
+    if (is.null(n_cty)) {
+      try({
+        all_counties <- aqs_counties_by_state(stateFIPS = state_code)
+        if (!is.null(all_counties) && nrow(all_counties) > 0) {
+          n_cty <- nrow(all_counties)
+          assign(state_code, n_cty, envir = county_cache_env)
+        }
+      }, silent = TRUE)
+    }
+    data_store$total_counties_in_state <- n_cty
 
     # Update Sidebar Filters & Slider
     if (!is.null(raw_data) && nrow(raw_data) > 0) {
