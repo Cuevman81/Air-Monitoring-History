@@ -282,7 +282,7 @@ ui <- page_sidebar(
                   tags$li("US Census Bureau (Population & Geographic Reference)"),
                   tags$li("Historical AQS Metadata Archive (1950 - Present)")
                 ),
-                footer = list(
+                card_footer(
                   p("Developed & Maintained by: Rodney Cuevas, Meteorologist (MDEQ)"),
                   p(tags$small("Project Version: 2.3 (Regulatory Audit Edition) - July 2026"))
                 )
