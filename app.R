@@ -387,8 +387,12 @@ server <- function(input, output, session) {
 
     codes <- unique(unlist(pollutants_default))
 
-    # Pull the official annual summaries: one statewide call per parameter code
+    # Pull the official annual summaries: one statewide call per parameter code.
+    # A code AQS did not answer for (HTTP error, rate limit) is unknown, not
+    # empty, so record it. Never show or log the error text: RAQSAPI puts the
+    # request URL, which carries the AQS email and key, in it.
     reported <- NULL
+    failed <- character(0)
     withProgress(message = paste0("Auditing ", audit_year, " AQS submissions"), value = 0, {
       reported <- map_dfr(codes, function(p_code) {
         incProgress(1 / length(codes), detail = paste("Parameter", p_code))
@@ -410,9 +414,20 @@ server <- function(input, output, session) {
               ) %>%
               distinct()
           } else NULL
-        }, error = function(e) NULL)
+        }, error = function(e) { failed <<- c(failed, p_code); NULL })
       })
     })
+
+    # Any unanswered parameter would flag every open monitor of that pollutant
+    # as phantom, so flag and save nothing
+    if (length(failed) > 0) {
+      message("[aqs] audit: no answer for parameter(s) ", paste(failed, collapse = ", "))
+      showNotification(paste0("Audit incomplete: AQS did not answer for parameter(s) ",
+                              paste(failed, collapse = ", "),
+                              ". Nothing was flagged or saved; try again later."),
+                       type = "error", duration = NULL)
+      return()
+    }
 
     # If nothing came back at all, treat it as an API failure rather than
     # flagging the entire network as phantom
