@@ -280,6 +280,16 @@ scenario("#2/#4/#9 main view", {
                 "pollutant_plot", "table", "audit_summary")) out(output, o)
     check("all outputs render (8)", TRUE)
 
+    # CARTO raster basemaps now need an API key (tiles carry an "API KEY
+    # REQUIRED" watermark), so every basemap must be a keyless Esri service
+    mp <- out(output, "map")
+    canvas <- c("World_Light_Gray_Base", "World_Light_Gray_Reference",
+                "World_Dark_Gray_Base", "World_Dark_Gray_Reference")
+    check("map basemaps are keyless Esri tiles, no CARTO",
+          all(sapply(canvas, grepl, x = mp, fixed = TRUE)) &&
+            grepl("Esri.WorldImagery", mp, fixed = TRUE) && grepl("Esri.WorldGrayCanvas", mp, fixed = TRUE) &&
+            !grepl("carto", mp, ignore.case = TRUE) && grepl('"maxNativeZoom":16', mp, fixed = TRUE))
+
     h <- processed_history()
     gp <- h$Active_Pollutants[h$local_site_name == "Gulfport SPM"]
     pp <- h$Active_Pollutants[h$local_site_name == "Pascagoula primary SPM"]

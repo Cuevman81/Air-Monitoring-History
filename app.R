@@ -905,9 +905,19 @@ server <- function(input, output, session) {
   
   # Leaflet Map (Base)
   output$map <- renderLeaflet({
+    # CARTO raster basemaps now require an API key (carto.com/basemaps/apikey),
+    # so Light/Dark use Esri's keyless Canvas services (base + labels layer).
+    # Canvas tiles exist only up to zoom 16 (deeper zooms return a "Map data
+    # not yet available" image), so Leaflet upscales zoom-16 tiles past that.
+    esri_canvas <- function(service) paste0(
+      "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/", service, "/MapServer/tile/{z}/{y}/{x}")
+    esri_attr <- "Tiles &copy; Esri &mdash; Esri, HERE, Garmin, &copy; OpenStreetMap contributors, and the GIS user community"
+    esri_opts <- tileOptions(maxNativeZoom = 16, maxZoom = 18)
     leaflet() %>%
-      addProviderTiles(providers$CartoDB.Voyager, group = "Modern Light") %>%
-      addProviderTiles(providers$CartoDB.DarkMatter, group = "Dark Mode") %>%
+      addTiles(esri_canvas("World_Light_Gray_Base"), attribution = esri_attr, options = esri_opts, group = "Modern Light") %>%
+      addTiles(esri_canvas("World_Light_Gray_Reference"), attribution = esri_attr, options = esri_opts, group = "Modern Light") %>%
+      addTiles(esri_canvas("World_Dark_Gray_Base"), attribution = esri_attr, options = esri_opts, group = "Dark Mode") %>%
+      addTiles(esri_canvas("World_Dark_Gray_Reference"), attribution = esri_attr, options = esri_opts, group = "Dark Mode") %>%
       addProviderTiles(providers$Esri.WorldImagery, group = "Satellite") %>%
       addLayersControl(
         baseGroups = c("Modern Light", "Dark Mode", "Satellite"),
@@ -915,7 +925,7 @@ server <- function(input, output, session) {
         options = layersControlOptions(collapsed = FALSE)
       ) %>%
       addScaleBar(position = "bottomleft") %>%
-      addMiniMap(tiles = providers$CartoDB.Voyager, toggleDisplay = TRUE) %>%
+      addMiniMap(tiles = providers$Esri.WorldGrayCanvas, toggleDisplay = TRUE) %>%
       addSearchOSM()
   })
   
