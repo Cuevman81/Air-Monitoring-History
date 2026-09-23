@@ -860,13 +860,13 @@ server <- function(input, output, session) {
       density <- round(active / (data_store$pop / 100000), 2)
       pop_fmt <- format(data_store$pop, big.mark = ",")
       HTML(paste0(
-        "<div>", density, " Monitors / 100k</div>",
+        "<div>", density, " Active Sites / 100k</div>",
         "<div style='font-size: 0.6em; opacity: 0.8;'>Pop: ", pop_fmt, "</div>"
       ))
     } else {
       HTML(paste0(
         "<div>", active, " Active Sites</div>",
-        "<div style='font-size: 0.6em; opacity: 0.8;'>Pop: Unknown (Check API Key)</div>"
+        "<div style='font-size: 0.6em; opacity: 0.8;'>Pop: Unknown (Census lookup failed)</div>"
       ))
     }
   })
@@ -1015,7 +1015,7 @@ server <- function(input, output, session) {
       geom_line(color = "#2c3e50", linewidth = 1) +
       geom_area(fill = "#3498db", alpha = 0.3) +
       theme_minimal() +
-      labs(title = "Network Growth: Active Monitors per Year", y = "Count", x = "")
+      labs(title = "Network Growth: Active Sites per Year", y = "Count", x = "")
     
     ggplotly(p) %>% config(displayModeBar = FALSE)
   })
@@ -1126,7 +1126,7 @@ server <- function(input, output, session) {
       theme_minimal() +
       theme(legend.position = "bottom") +
       labs(title = "Network Trends: Continuous vs. Manual Sampling & Regulatory Mix", 
-           x = "", y = "Active Monitors", fill = "Monitor Type")
+           x = "", y = "Active Sites", fill = "Monitor Type")
     
     ggplotly(p, tooltip = "text") %>% 
       layout(
