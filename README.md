@@ -4,7 +4,7 @@ A professional, state-agnostic R-Shiny dashboard designed for technical auditing
 
 ### 🚀 [Live Demo (shinyapps.io)](https://rcuevas.shinyapps.io/Air_Monitoring_History/)
 
-![Interactive map of Mississippi's air monitoring sites with the network filters](images/screenshot.png)
+![Air Monitoring Network History: coverage, record-holder and county boxes above the interactive map of Mississippi's monitoring sites](images/screenshot.png)
 
 ---
 
