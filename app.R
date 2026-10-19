@@ -203,8 +203,10 @@ ui <- page_sidebar(
   ),
   
   # Dashboard Layout
+  # Sized to the content (min_height, fill = FALSE) rather than a fixed 120px,
+  # which clipped the two-line values at ordinary window widths.
   layout_column_wrap(
-    width = 1/3, height = "120px",
+    width = 1/3, min_height = "120px", fill = FALSE, heights_equal = "row",
     value_box(
       title = "Active Coverage",
       value = uiOutput("active_coverage"),
@@ -881,13 +883,13 @@ server <- function(input, output, session) {
       newest <- hist %>% arrange(desc(Site_Established)) %>% slice(1)
       
       HTML(paste0(
-        "<div style='font-size: 0.8em;'>",
+        "<div style='font-size: 0.55em; line-height: 1.35;'>",
         "<b>Oldest Active:</b> ", htmlEscape(oldest$local_site_name), " (", year(oldest$Site_Established), ")<br>",
         "<b>Newest Overall:</b> ", htmlEscape(newest$local_site_name), " (", year(newest$Site_Established), ")",
         "</div>"
       ))
     } else {
-      HTML("<div style='font-size: 0.8em;'>No Active Sites Found</div>")
+      HTML("<div style='font-size: 0.55em;'>No Active Sites Found</div>")
     }
   })
   
